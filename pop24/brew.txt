@@ -1,0 +1,7 @@
+# Homebrew formulae specific to Pop!_OS 24.04.
+#
+# The shared list is ../common/brew.txt and is installed on every platform;
+# this file is only for additions unique to this one. Both are read, and a
+# formula appearing in both is installed once.
+#
+# Nothing here yet: every tool this machine uses is in the shared list.

@@ -1,0 +1,11 @@
+# Packages purged with apt. One per line; "#" starts a comment.
+#
+# This runs BEFORE the install stage on purpose: needrestart is what
+# interrogates you about restarting services during every apt transaction, so
+# purging it first makes the rest of the run quiet.
+#
+# Packages are purged when dpkg reports them as either "installed" or
+# "config-files", so a package you previously removed without --purge gets
+# fully cleaned up on the next run.
+
+needrestart

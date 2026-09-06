@@ -1,0 +1,62 @@
+# Packages installed with apt on Pop!_OS 24.04. One per line; "#" a comment.
+#
+# Separate from ubuntu26/apt.txt because this tracks 24.04, not 26.04: package
+# versions differ throughout and a few names drift between releases. Homebrew
+# formulae are not release-tied, so those are shared in ../common/brew.txt
+# instead of duplicated here.
+#
+# Deliberately excluded: the NVIDIA, CUDA, System76 and nvidia-container
+# packages, which need pinned versions and third-party repos; and the COSMIC,
+# casper, distinst, language-pack, font, hunspell and LibreOffice locale
+# packages, which the Pop!_OS installer puts there rather than you.
+
+# Homebrew prerequisites. build-essential is not optional: Homebrew on Linux
+# compiles against the system toolchain.
+build-essential
+curl
+file
+git
+procps
+
+# System trust and signing
+ca-certificates
+gnupg
+
+# Shell and editors
+neovim
+tmux
+vim
+
+# Networking and transfer
+net-tools
+openssh-server
+rsync
+
+# Utilities apt ships at parity with brew
+expect
+htop
+jq
+make
+tree
+unzip
+
+# psql. brew's equivalent is the keg-only libpq, which needs manual linking.
+postgresql-client
+
+# --- specific to this machine -------------------------------------------------
+# Found in use by the survey and absent from ubuntu26's list.
+
+# Large-file support, used by the repos on this host.
+git-lfs
+
+# Transcoding. apt's 6.1.1 is adequate here and brew's build pulls in roughly a
+# hundred formulae.
+ffmpeg
+
+# Wayland-compatible input automation. No brew formula, and it needs uinput
+# access plus a systemd service, so apt is the only sensible source.
+ydotool
+
+# GPU monitoring. Must match the installed NVIDIA driver, so it has to come
+# from the same archive as the driver rather than from brew.
+nvtop

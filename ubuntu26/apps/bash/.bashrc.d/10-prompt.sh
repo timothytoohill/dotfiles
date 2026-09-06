@@ -1,7 +1,12 @@
-# Multi-line bash prompt. Sourced from ~/.bashrc via the ~/.bashrc.d loader.
+# Three-line bash prompt. Sourced from ~/.bashrc via the ~/.bashrc.d loader.
 #
-#  2026-09-03 12:06:31.457  since 00:00:04.881  cmd 00:00:01.253  tim@host  ~/some/dir  branch +2 !1 ?3 ^1
+# 2026-09-03 12:06:31.457 since 00:00:04.881 cmd 00:00:01.253
+# tim@host:~/some/dir (branch +2 !1 ?3 ^1)
 # $
+#
+# Line 1 is timing. Line 2 is Ubuntu's stock prompt unchanged -- same colours,
+# same \u@\h:\w layout, same chroot prefix -- with a git segment appended.
+# Line 3 is the input line, kept empty so long commands start at column 0.
 #
 # Git markers: +staged !unstaged ?untracked xconflict ^ahead vbehind, plus
 # REBASE/MERGE/CHERRY/REVERT/BISECT when an operation is in flight. The
@@ -29,22 +34,27 @@ __ccp_prompt() {
     local now_us=$(( ${now%.*} * 1000000 + 10#${now#*.} ))
 
     # --- palette -------------------------------------------------------
-    # Truecolor "38;2;<fg rgb>;48;2;<bg rgb>". \[ \] marks them zero-width
-    # for readline. Hue lives in the background, each held near L*=13 so the
-    # segments stay equally dark yet separable. Channel values differ wildly
-    # per hue only because blue carries 7% of luminance against yellow's 93%.
-    # Text is one dim grey throughout: dim red on a visibly red background
-    # cannot reach a usable contrast ratio at any intensity.
-    # Black clock, red timers (cmd lighter than since), grey identity,
-    # blue path, yellow git. Red text is reserved for an unclean tree.
+    # \[ \] marks every sequence zero-width for readline.
+    #
+    # Line 1 is truecolor "38;2;<fg rgb>;48;2;<bg rgb>" blocks. Hue lives in
+    # the background, each held near L*=13 so the segments stay equally dark
+    # yet separable. Channel values differ wildly per hue only because blue
+    # carries 7% of luminance against yellow's 93%. Text is one dim grey
+    # throughout: dim red on a visibly red background cannot reach a usable
+    # contrast ratio at any intensity. Black clock, red timers, cmd lighter
+    # than since.
+    #
+    # Line 2 reuses Ubuntu's stock codes exactly: 01;32 identity, 01;34 path.
+    # Those are bold text on the default background, so git matches that
+    # style rather than the blocks above -- 01;33 clean, 01;31 unclean.
     local r='\[\033[0m\]'
     local c_time='\[\033[38;2;199;199;199;48;2;0;0;0m\]'
     local c_wall='\[\033[38;2;199;199;199;48;2;61;0;0m\]'
-    local c_user='\[\033[38;2;199;199;199;48;2;34;34;34m\]'
-    local c_dir='\[\033[38;2;199;199;199;48;2;0;0;128m\]'
-    local c_git='\[\033[38;2;199;199;199;48;2;35;35;0m\]'
-    local c_gitd='\[\033[38;2;246;91;91;48;2;35;35;0m\]'
     local c_cmd='\[\033[38;2;199;199;199;48;2;93;0;0m\]'
+    local c_user='\[\033[01;32m\]'
+    local c_dir='\[\033[01;34m\]'
+    local c_git='\[\033[01;33m\]'
+    local c_gitd='\[\033[01;31m\]'
 
     # --- segment: clock, YYYY-MM-DD HH:MM:SS.sss, US Eastern ------------
     # TZ must be a command prefix: a plain (or local) TZ= assignment is not
@@ -117,7 +127,7 @@ __ccp_prompt() {
         if (( staged + unstaged + untracked + conflict )) || [[ -n $state ]]; then
             c=$c_gitd
         fi
-        seg_git="${c} ${label}${marks}${state} ${r}"
+        seg_git=" ${c}(${label}${marks}${state})${r}"
     fi
 
     # --- segment: terminal / tmux pane title ----------------------------
@@ -135,12 +145,20 @@ __ccp_prompt() {
     esac
 
     # --- assembly -------------------------------------------------------
-    PS1="${title}${c_time} ${stamp} ${r}"
-    PS1+="${c_wall} since ${wall_time} ${r}"
-    PS1+="${c_cmd} cmd ${cmd_time} ${r}"
-    PS1+="${c_user} \u@\h ${r}"
-    PS1+="${c_dir} \w ${r}"
-    PS1+="${seg_git}"
+    # Line 2 is Ubuntu's stock PS1 with the trailing "\$ " moved to line 3:
+    #   ${debian_chroot:+($debian_chroot)}\[01;32m\]\u@\h\[00m\]:\[01;34m\]\w
+    # debian_chroot is expanded here rather than left as a literal for bash to
+    # expand later, so the prompt does not depend on the promptvars option.
+    #
+    # On line 1 the separating space leads each block rather than trailing it,
+    # so it picks up the incoming background colour. That leaves the line flush
+    # at both ends -- no pad before the timestamp, no stray coloured cell after
+    # the last timer -- with exactly one space between blocks.
+    PS1="${title}${c_time}${stamp}${r}"
+    PS1+="${c_wall} since ${wall_time}${r}"
+    PS1+="${c_cmd} cmd ${cmd_time}${r}"
+    PS1+="\n${debian_chroot:+($debian_chroot)}"
+    PS1+="${c_user}\u@\h${r}:${c_dir}\w${r}${seg_git}"
     PS1+="\n\$ "
 }
 PROMPT_COMMAND=__ccp_prompt

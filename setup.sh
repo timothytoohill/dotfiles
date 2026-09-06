@@ -30,6 +30,7 @@ if [[ ${1:-} && ${1:0:1} != - ]]; then
     shift
 elif [[ -r /etc/os-release ]]; then
     target=$(
+        # shellcheck source=/dev/null
         . /etc/os-release
         version=${VERSION_ID:-}
         printf '%s%s' "${ID:-unknown}" "${version%%.*}"

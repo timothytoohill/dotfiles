@@ -2,14 +2,26 @@
 #
 # setup.sh installs only what is missing, so adding a line here and re-running
 # does the minimum amount of work.
+#
+# What belongs here rather than in brew.txt: anything the system integrates
+# with (trust stores, daemons, toolchains), and anything apt already ships at
+# parity. Fast-moving CLI tools go in brew.txt, where they are not pinned to
+# the distro release. See the README for the split.
 
 # Homebrew prerequisites. Keep these: the brew stage needs them on a bare
 # machine, and listing them here means one pass sets everything up.
+# build-essential in particular is not optional -- Homebrew on Linux compiles
+# against the system toolchain and refuses to work without it.
 build-essential
 curl
 file
 git
 procps
+
+# System trust and signing. Wanted by apt itself, so brew's copies are no
+# substitute.
+ca-certificates
+gnupg
 
 # Shell and editors
 neovim
@@ -20,3 +32,17 @@ vim
 net-tools
 openssh-server
 rsync
+
+# Utilities apt ships at parity with brew, or close enough that tracking the
+# newer version buys nothing: unzip and make are identical builds, expect has
+# not moved in years, and htop/tree/jq are within a patch release.
+expect
+htop
+jq
+make
+tree
+unzip
+
+# psql and friends. brew's equivalent is the keg-only libpq, which has to be
+# manually linked onto PATH; apt gives the client tools directly.
+postgresql-client

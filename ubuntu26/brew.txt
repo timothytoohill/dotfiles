@@ -3,9 +3,13 @@
 # Fully-qualified names (user/tap/formula) are fine -- "brew install" taps
 # automatically. setup.sh matches against installed packages on the segment
 # after the last "/", since "brew list" reports the short name.
-
-# AI coding agent.
 #
+# What belongs here rather than in apt.txt: tools that move faster than the
+# Ubuntu release cycle, and tools Ubuntu does not package at all. The gap is
+# not academic -- apt ships gh 2.46 against brew's 2.100.
+
+# --- AI tooling -------------------------------------------------------------
+
 # Deliberately the upstream tap and NOT homebrew-core's "opencode". The core
 # formula is maintained by the Homebrew team and lags: it was 1.18.20 when the
 # tap was already at 1.18.29. The tap is GoReleaser-generated and bumped on
@@ -15,3 +19,51 @@ anomalyco/tap/opencode
 
 # CLI for talking to LLMs.
 llm
+
+# Agent memory. In homebrew-core; the install-script copy that ships to
+# ~/.local/bin goes stale silently and shadows this one on PATH.
+beads
+
+# --- Development ------------------------------------------------------------
+
+# apt has 2.46.0 against 2.100.0 here -- by far the worst lag of anything
+# Ubuntu packages that we actually use.
+gh
+
+# apt 4.2.3 vs 4.4.3.
+cmake
+
+# apt 0.67.0 vs 0.74.3.
+fzf
+
+# Same version as apt today, but brew tracks new releases and apt will not
+# until the next Ubuntu.
+shellcheck
+
+# Pinned major rather than plain "node", which is on 26 and floats across
+# major versions. pnpm comes from this formula's corepack.
+node@22
+pnpm
+
+# Not packaged by Ubuntu at all. The install script drops it in ~/.local/bin
+# where it goes stale unnoticed.
+uv
+
+# --- Cloud and Kubernetes ---------------------------------------------------
+# None of these are in the Ubuntu archive. Installed by hand into
+# /usr/local/bin they never update; here they move with "brew upgrade".
+
+awscli
+helm
+k3d
+k9s
+kubernetes-cli
+yq
+
+# --- gRPC and protobuf ------------------------------------------------------
+# Previously "go install"-ed, which pins them to whatever Go toolchain was
+# present and leaves them out of any upgrade path.
+
+grpcurl
+protoc-gen-go
+protoc-gen-go-grpc

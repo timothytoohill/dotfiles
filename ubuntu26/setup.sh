@@ -163,6 +163,7 @@ preflight() {
 
     if [[ -r /etc/os-release ]]; then
         local id=''
+        # shellcheck source=/dev/null
         id=$(. /etc/os-release && printf '%s' "${ID:-}")
         if [[ $id != ubuntu ]] && ! $FORCE; then
             die "expected Ubuntu but found '${id:-unknown}'. Use --force to override."
@@ -352,22 +353,68 @@ stage_brew() {
 # Stage: brew-packages
 #==============================================================================
 
-# The install-script copy of opencode shadows the brew one -- ~/.bashrc
-# prepends ~/.opencode/bin to PATH -- and costs 239M. Nothing in there is user
-# data: sessions live in ~/.local/share/opencode, config in ~/.config/opencode,
-# and neither is touched here. Removed only once brew's copy actually runs.
-migrate_opencode() {
-    [[ -d $HOME/.opencode ]] || return 0
+# Hand-installed copies that Homebrew now provides. Installer scripts drop
+# these into ~/.local/bin, /usr/local/bin or a private prefix, all of which sit
+# ahead of Homebrew on PATH -- so the old binary keeps winning and silently
+# goes stale. They are never upgraded by anything.
+#
+#   <formula>|<binary>|<path to remove>...
+#
+# The binary name is listed separately because it does not always match the
+# formula (kubernetes-cli ships kubectl, beads ships bd). Only these exact
+# paths are ever removed; user data is not involved. opencode is the clearest
+# case -- its 239M private prefix holds no state at all, since sessions live
+# in ~/.local/share/opencode and config in ~/.config/opencode.
+SHADOWED=(
+    "opencode|opencode|$HOME/.opencode"
+    "uv|uv|$HOME/.local/bin/uv|$HOME/.local/bin/uvx"
+    "beads|bd|$HOME/.local/bin/bd|$HOME/.local/bin/beads"
+    "helm|helm|/usr/local/bin/helm"
+    "k3d|k3d|/usr/local/bin/k3d"
+    "kubernetes-cli|kubectl|/usr/local/bin/kubectl"
+)
 
-    local b="${HOMEBREW_PREFIX:-$BREW_FALLBACK}/bin/opencode"
-    [[ -x $b ]] || return 0
-    "$b" --version >/dev/null 2>&1 || {
-        warn "brew opencode is not runnable; leaving ~/.opencode in place"
-        return 0
-    }
+# Remove a shadowing copy only once brew's replacement is installed AND runs,
+# so a failed install can never leave the tool missing altogether.
+prune_shadowed() {
+    local -n installed=$1
+    local entry formula binary bin rc p
+    local -a fields=() paths=()
+    local prefix="${HOMEBREW_PREFIX:-$BREW_FALLBACK}"
 
-    act removed "~/.opencode (superseded by brew; sessions are unaffected)"
-    run rm -rf "$HOME/.opencode"
+    for entry in "${SHADOWED[@]}"; do
+        IFS='|' read -r -a fields <<< "$entry"
+        formula=${fields[0]}
+        binary=${fields[1]}
+        paths=("${fields[@]:2}")
+        [[ -n ${installed[$formula]:-} ]] || continue
+
+        bin="$prefix/bin/$binary"
+        [[ -x $bin ]] || continue
+
+        # 126/127 are "cannot execute" and "not found". Any other status means
+        # the binary loaded fine, whatever it made of the argument -- which
+        # matters because version flags are not consistent (helm wants
+        # "version", kubectl wants "version --client").
+        "$bin" --version >/dev/null 2>&1
+        rc=$?
+        if ((rc == 126 || rc == 127)); then
+            warn "brew $formula is not runnable; leaving its old copy in place"
+            continue
+        fi
+
+        # Every path for the entry, so a partially cleaned install finishes.
+        for p in "${paths[@]}"; do
+            [[ -e $p ]] || continue
+            act removed "$(tilde "$p") (superseded by brew $formula)"
+            if [[ -w ${p%/*} ]]; then
+                run rm -rf "$p"
+            else
+                need_sudo
+                run sudo rm -rf "$p"
+            fi
+        done
+    done
 }
 
 stage_brew_packages() {
@@ -395,14 +442,19 @@ stage_brew_packages() {
             continue
         fi
         act install "$spec"
-        $DRY_RUN && continue
-        if ! brew install "$spec"; then
+        if $DRY_RUN; then
+            have[${spec##*/}]=1      # so prune_shadowed reports realistically
+            continue
+        fi
+        if brew install "$spec"; then
+            have[${spec##*/}]=1
+        else
             FAILURES+=("brew install $spec")
             bad failed "brew install $spec"
         fi
     done
 
-    migrate_opencode
+    prune_shadowed have
 }
 
 #==============================================================================

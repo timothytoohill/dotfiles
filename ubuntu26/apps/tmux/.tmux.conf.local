@@ -276,7 +276,22 @@ tmux_conf_theme_right_separator_sub="|"
 #     - #{username_ssh}
 tmux_conf_theme_status_left=" ❐ #S | ↑#{?uptime_y, #{uptime_y}y,}#{?uptime_d, #{uptime_d}d,}#{?uptime_h, #{uptime_h}h,}#{?uptime_m, #{uptime_m}m,} "
 #tmux_conf_theme_status_left=" ❐ #S | ↑#{?uptime_y, #{uptime_y}y,}#{?uptime_d, #{uptime_d}d,}#{?uptime_h, #{uptime_h}h,}#{?uptime_m, #{uptime_m}m,} | #{pretty_pane_current_path} "
-tmux_conf_theme_status_right=" #{prefix}#{mouse}#{pairing}#{synchronized}#{?battery_status, #{battery_status},}#{?battery_bar, #{battery_bar},}#{?battery_percentage, #{battery_percentage},} , %R , %d %b | #{username}#{root} | #{hostname} "
+# The clock is US Eastern with DST, matching the bash prompt. The host itself
+# stays on UTC, so tmux's own %R and %d %b -- rendered by strftime inside the
+# tmux server process -- would show UTC. There is no tmux option to set a
+# timezone for those: the server picks it up from its own environment when it
+# starts, and set-environment does not reach it. Starting the server under
+# TZ would work, but it leaks into every pane, making date and every timestamp
+# Eastern too. Shelling out keeps the override scoped to the clock, exactly as
+# the prompt scopes it to one printf.
+#
+# The %% are required. tmux expands strftime over the whole string before
+# running the command, so a single % would be substituted by tmux and never
+# reach date. Backslash is not an escape here; %% is.
+#
+# Time and date come from one date call rather than two, so the status line
+# costs a single fork per redraw (status-interval is 10s).
+tmux_conf_theme_status_right=" #{prefix}#{mouse}#{pairing}#{synchronized}#{?battery_status, #{battery_status},}#{?battery_bar, #{battery_bar},}#{?battery_percentage, #{battery_percentage},} , #(TZ=America/New_York date +'%%R , %%d %%b') | #{username}#{root} | #{hostname} "
 
 # status left style
 tmux_conf_theme_status_left_fg="$tmux_conf_theme_colour_6,$tmux_conf_theme_colour_7,$tmux_conf_theme_colour_8"

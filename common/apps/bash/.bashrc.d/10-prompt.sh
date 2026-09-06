@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Three-line bash prompt. Sourced from ~/.bashrc via the ~/.bashrc.d loader.
 #
 # 2026-09-03 12:06:31.457 since 00:00:04.881 cmd 00:00:01.253
@@ -14,20 +15,20 @@
 
 # DEBUG fires just before every command. The guard keeps the timestamp of the
 # *first* command after a prompt, so pipelines/lists measure end-to-end.
-__ccp_timer_start() {
-    [[ -n ${__ccp_cmd_start:-} ]] || __ccp_cmd_start=$EPOCHREALTIME
+__tt_timer_start() {
+    [[ -n ${__tt_cmd_start:-} ]] || __tt_cmd_start=$EPOCHREALTIME
 }
-trap '__ccp_timer_start' DEBUG
+trap '__tt_timer_start' DEBUG
 
 # $1 = destination variable, $2 = microseconds -> HH:MM:SS.sss
-__ccp_hms() {
+__tt_hms() {
     local ms=$(( $2 / 1000 ))
     printf -v "$1" '%02d:%02d:%02d.%03d' \
         "$(( ms / 3600000 ))" "$(( ms / 60000 % 60 ))" \
         "$(( ms / 1000 % 60 ))" "$(( ms % 1000 ))"
 }
 
-__ccp_prompt() {
+__tt_prompt() {
     local now=$EPOCHREALTIME
     # "1788436798.654028" -> integer microseconds. 10# stops the zero-padded
     # fraction being parsed as octal.
@@ -75,14 +76,14 @@ __ccp_prompt() {
         printf -v stamp '%(%Y-%m-%d %H:%M:%S)T.%s' "${now%.*}" "${frac:0:3}"
 
     # --- segment: runtime of the command that just finished -------------
-    local start=${__ccp_cmd_start:-$now} cmd_time
-    __ccp_hms cmd_time "$(( now_us - (${start%.*} * 1000000 + 10#${start#*.}) ))"
-    unset __ccp_cmd_start
+    local start=${__tt_cmd_start:-$now} cmd_time
+    __tt_hms cmd_time "$(( now_us - (${start%.*} * 1000000 + 10#${start#*.}) ))"
+    unset __tt_cmd_start
 
     # --- segment: wall time since the previous prompt was drawn ---------
     local wall_time
-    __ccp_hms wall_time "$(( now_us - ${__ccp_last_prompt_us:-$now_us} ))"
-    __ccp_last_prompt_us=$now_us
+    __tt_hms wall_time "$(( now_us - ${__tt_last_prompt_us:-$now_us} ))"
+    __tt_last_prompt_us=$now_us
 
     # --- segment: git, omitted entirely outside a repo ------------------
     # One status call yields the branch, upstream tracking and every file
@@ -172,4 +173,4 @@ __ccp_prompt() {
     PS1+="${c_user}\u@\h${r}:${c_dir}\w${r}${seg_git}"
     PS1+="\n\$ "
 }
-PROMPT_COMMAND=__ccp_prompt
+PROMPT_COMMAND=__tt_prompt

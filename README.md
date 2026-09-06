@@ -105,17 +105,24 @@ Ubuntu has no drop-in directory for bash, so setup appends one guarded block to
 ```sh
 # >>> dotfiles (ubuntu26) >>>
 ...sources ~/.bashrc.d/*.sh...
-# <<< dotfiles (ubuntu26) <<<
+# <<< dotfiles <<<
 ```
 
 That is the only edit ever made. Everything else lives in `~/.bashrc.d/`.
 
-The block is rebuilt and appended at the end of the file on each run, which
-matters because stock Ubuntu assigns `PS1` partway down and the prompt drop-in
-has to load after it. The rebuild is diffed against the existing file, so an
-already-correct `~/.bashrc` is not written at all — its mtime does not even
-change. A duplicated block collapses back to one; a block with a missing end
-marker is reported loudly rather than silently.
+The block is rebuilt and appended at the end of the file on each run. The
+rebuild is diffed against the existing file, so an already-correct `~/.bashrc`
+is not written at all — its mtime does not even change. A duplicated block
+collapses back to one; a block with a missing end marker is reported loudly
+rather than silently.
+
+Appending last is about `PATH`, not the prompt. The prompt is set inside
+`PROMPT_COMMAND`, which runs before every prompt and overwrites `PS1` whatever
+position the block occupies. `PATH` is the part that is order-sensitive, and
+`brew shellenv` in particular is not idempotent — it prepends unconditionally,
+so re-running it jumps ahead of anything already in front of Homebrew. That is
+why anything which must outrank Homebrew asserts itself from a later-numbered
+drop-in such as `90-proto.sh`, rather than relying on where the block sits.
 
 ## Copies, not symlinks
 

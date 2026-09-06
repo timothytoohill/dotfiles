@@ -27,29 +27,38 @@ Look before you leap:
 ## Layout
 
 ```
-setup.sh                     platform dispatcher
-ubuntu26/
-├── setup.sh                 all the work
-├── apt.txt                  packages to install with apt
-├── apt-remove.txt           packages to purge with apt
-├── brew.txt                 formulae and casks to install with Homebrew
-└── apps/                    one directory per app; contents mirror $HOME
-    ├── bash/
-    │   └── .bashrc.d/
-    │       ├── 00-brew.sh   Homebrew environment
-    │       └── 10-prompt.sh multi-line prompt with git status and timers
+setup.sh                      platform dispatcher
+lib/setup-lib.sh              all the work, shared by every platform
+common/
+├── brew.txt                  formulae installed everywhere
+└── apps/                     configs installed everywhere; mirror $HOME
+    ├── bash/.bashrc.d/
+    │   ├── 00-brew.sh        Homebrew environment
+    │   └── 10-prompt.sh      three-line prompt with git status and timers
     └── tmux/
-        ├── .tmux.conf       oh-my-tmux
-        └── .tmux.conf.local local overrides
+        ├── .tmux.conf        oh-my-tmux
+        └── .tmux.conf.local  local overrides
+ubuntu26/                     Ubuntu 26.04
+├── setup.sh                  thin wrapper: sets EXPECTED_ID, sources the lib
+├── apt.txt                   packages to install with apt
+├── apt-remove.txt            packages to purge with apt
+├── brew.txt                  formulae for this platform only
+└── apps/                     optional; overrides common/apps per file
+pop24/                        Pop!_OS 24.04, same shape
 ```
 
-Every directory under `apps/` is an app, and its contents mirror `$HOME`:
+Every directory under an `apps/` tree is an app, and its contents mirror
+`$HOME`:
 
 | repo | installs to |
 | --- | --- |
-| `ubuntu26/apps/tmux/.tmux.conf` | `~/.tmux.conf` |
-| `ubuntu26/apps/bash/.bashrc.d/10-prompt.sh` | `~/.bashrc.d/10-prompt.sh` |
-| `ubuntu26/apps/foo/.config/foo/x.toml` | `~/.config/foo/x.toml` |
+| `common/apps/tmux/.tmux.conf` | `~/.tmux.conf` |
+| `common/apps/bash/.bashrc.d/10-prompt.sh` | `~/.bashrc.d/10-prompt.sh` |
+| `pop24/apps/foo/.config/foo/x.toml` | `~/.config/foo/x.toml` |
+
+Two `apps/` trees are read: `common/apps` first, then `<platform>/apps`. Where
+both provide the same destination the platform wins, so a platform overrides a
+shared config by simply placing its own copy at the same path.
 
 Nesting works to any depth. Nothing outside `apps/` is ever installed, so the
 package lists and `setup.sh` sit at the platform level without needing to be
@@ -65,7 +74,12 @@ occupy relative to `$HOME`, creating `<app>/` if needed. Nothing to register.
 entry per line, `#` starts a comment. Fully-qualified brew names
 (`user/tap/formula`) work; `brew install` taps automatically.
 
-Which list? **brew for anything that moves faster than the Ubuntu release
+apt lists are per-platform, because package names and versions differ between
+releases. Homebrew is not tied to the distro, so its list is shared in
+`common/brew.txt`; a platform's own `brew.txt` is only for genuine additions,
+and a formula in both is installed once.
+
+Which list? **brew for anything that moves faster than the distro release
 cycle, apt for anything the system integrates with.** The gap is not
 theoretical — Ubuntu 26 ships `gh` 2.46 against Homebrew's 2.100, and does not
 package `kubectl`, `helm`, `k9s`, `yq`, `uv` or `pnpm` at all. Conversely
@@ -76,8 +90,12 @@ need apt's systemd integration rather than brew's CLI-only builds.
 **A shell tweak** — add a numbered file to `apps/bash/.bashrc.d/`. It gets
 sourced on shell start with no further wiring. Prefix controls order.
 
-**A platform** — create a sibling directory with an executable `setup.sh`. The
-dispatcher finds it automatically.
+**A platform** — create a directory named `<ID><major VERSION_ID>` exactly as
+`/etc/os-release` reports it, containing an executable `setup.sh` that sets
+`PLATFORM_DIR`, `EXPECTED_ID` and `EXPECTED_NAME` then sources
+`lib/setup-lib.sh`. Copy `pop24/setup.sh` as the template. The dispatcher finds
+it automatically. Note the name comes from `ID`, not the marketing name:
+Pop!_OS reports `ID=pop`, so the directory is `pop24`, not `popos24`.
 
 ## How `~/.bashrc` is handled
 

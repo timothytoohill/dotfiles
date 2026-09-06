@@ -289,8 +289,13 @@ tmux_conf_theme_status_left=" ❐ #S | ↑#{?uptime_y, #{uptime_y}y,}#{?uptime_d
 # running the command, so a single % would be substituted by tmux and never
 # reach date. Backslash is not an escape here; %% is.
 #
-# Time and date come from one date call rather than two, so the status line
-# costs a single fork per redraw (status-interval is 10s).
+# Two date calls rather than one, despite the extra fork per redraw. The
+# commas separating these fields are oh-my-tmux segment separators, and they
+# are what give the time and the date their own colours out of
+# tmux_conf_theme_status_right_fg. Emitting "%%R , %%d %%b" from a single call
+# would place that comma inside #( ), where oh-my-tmux's parser tracks bracket
+# depth and deliberately preserves it -- collapsing both fields into one
+# segment and changing the colouring.
 tmux_conf_theme_status_right=" #{prefix}#{mouse}#{pairing}#{synchronized}#{?battery_status, #{battery_status},}#{?battery_bar, #{battery_bar},}#{?battery_percentage, #{battery_percentage},} , #(TZ=America/New_York date +'%%R') , #(TZ=America/New_York date +'%%d %%b') | #{username}#{root} | #{hostname} "
 
 # status left style
@@ -424,7 +429,12 @@ set -g mouse on
 set -g set-clipboard on
 
 # allow sequence pass-through
-set -option -g allow-passthrough on
+# "set -option" was a typo for "set-option": tmux read the stray -option as
+# bundled short flags -o -p -t, and -t consumed the trailing "ion" as a pane
+# target. The line failed with "no such pane: ion" and passthrough silently
+# stayed off. Later lines still ran -- tmux does not stop at a bad command --
+# but source-file reported the failure by returning 1.
+set-option -g allow-passthrough on
 
 # define terminal features
 set -as terminal-features 'tmux-256color:extkeys'

@@ -46,14 +46,25 @@ __ccp_prompt() {
     #
     # Line 2 reuses Ubuntu's stock codes exactly: 01;32 identity, 01;34 path.
     # Those are bold text on the default background, so git matches that
-    # style rather than the blocks above -- 01;33 clean, 01;31 unclean.
+    # style rather than the blocks above.
+    #
+    # Git is supplementary, so it takes the normal-intensity yellow (#C4A000,
+    # relative luminance 0.37) rather than the bright one (#FCE94F, 0.79).
+    # Bright yellow is the most luminous slot in the palette -- 2.4x the path
+    # blue it sits beside -- so it read as the loudest thing on the line while
+    # carrying the least important information. Normal yellow lands next to
+    # that blue (0.33), so the segment sits with the path rather than over it.
+    #
+    # Unclean keeps the bright red: at 0.20 it is already the dimmest colour
+    # here, and it is the one state that has to catch the eye. Its weight
+    # buys salience, not brightness.
     local r='\[\033[0m\]'
     local c_time='\[\033[38;2;199;199;199;48;2;0;0;0m\]'
     local c_wall='\[\033[38;2;199;199;199;48;2;61;0;0m\]'
     local c_cmd='\[\033[38;2;199;199;199;48;2;93;0;0m\]'
     local c_user='\[\033[01;32m\]'
     local c_dir='\[\033[01;34m\]'
-    local c_git='\[\033[01;33m\]'
+    local c_git='\[\033[33m\]'
     local c_gitd='\[\033[01;31m\]'
 
     # --- segment: clock, YYYY-MM-DD HH:MM:SS.sss, US Eastern ------------

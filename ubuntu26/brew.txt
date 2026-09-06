@@ -1,0 +1,17 @@
+# Formulae and casks installed with Homebrew. One per line; "#" a comment.
+#
+# Fully-qualified names (user/tap/formula) are fine -- "brew install" taps
+# automatically. setup.sh matches against installed packages on the segment
+# after the last "/", since "brew list" reports the short name.
+
+# AI coding agent.
+#
+# Deliberately the upstream tap and NOT homebrew-core's "opencode". The core
+# formula is maintained by the Homebrew team and lags: it was 1.18.20 when the
+# tap was already at 1.18.29. The tap is GoReleaser-generated and bumped on
+# every release. It also depends on ripgrep alone, where core additionally
+# pulls in node.
+anomalyco/tap/opencode
+
+# CLI for talking to LLMs.
+llm

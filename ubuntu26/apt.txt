@@ -1,0 +1,22 @@
+# Packages installed with apt. One per line; "#" starts a comment.
+#
+# setup.sh installs only what is missing, so adding a line here and re-running
+# does the minimum amount of work.
+
+# Homebrew prerequisites. Keep these: the brew stage needs them on a bare
+# machine, and listing them here means one pass sets everything up.
+build-essential
+curl
+file
+git
+procps
+
+# Shell and editors
+neovim
+tmux
+vim
+
+# Networking and transfer
+net-tools
+openssh-server
+rsync

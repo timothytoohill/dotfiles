@@ -182,7 +182,9 @@ need_sudo() {
         printf '    %sAdministrator privileges are required for package management.%s\n' \
             "$C_BOLD" "$C_RESET"
     fi
-    sudo -v || die "sudo authentication failed"
+    # Returns non-zero rather than dying: a stage that cannot get sudo should
+    # fail on its own terms and let the stages that need no privileges run.
+    sudo -v || { warn "sudo authentication failed"; return 1; }
 
     ( while kill -0 "$$" 2>/dev/null; do sudo -n true 2>/dev/null; sleep 50; done ) &
     SUDO_PID=$!
@@ -208,7 +210,7 @@ read_list() {
 pkg_status() { dpkg-query -W -f='${db:Status-Status}' "$1" 2>/dev/null || true; }
 
 apt_get() {
-    need_sudo
+    need_sudo || return 1
     run sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get "$@"
 }
 
@@ -266,8 +268,9 @@ stage_apt_remove() {
     ((${#victims[@]})) || return 0
 
     act purge "${victims[*]}"
-    apt_get purge -y "${victims[@]}"
-    apt_get autoremove --purge -y
+    apt_get purge -y "${victims[@]}" || { bad failed "apt-get purge"; return 1; }
+    apt_get autoremove --purge -y    || warn "apt-get autoremove failed"
+    return 0
 }
 
 #==============================================================================
@@ -297,10 +300,11 @@ stage_apt() {
         info "package lists are fresh; skipping update (--refresh to force)"
     else
         act update "apt-get update"
-        apt_get update -qq
+        apt_get update -qq || warn "apt-get update failed; using the cached lists"
     fi
     act install "${missing[*]}"
-    apt_get install -y "${missing[@]}"
+    apt_get install -y "${missing[@]}" || { bad failed "apt-get install"; return 1; }
+    return 0
 }
 
 #==============================================================================
@@ -343,10 +347,12 @@ stage_brew() {
     act install "Homebrew"
     $DRY_RUN && return 0
 
-    need_sudo
+    need_sudo || return 1
     NONINTERACTIVE=1 /bin/bash -c \
-        "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    load_brew || die "Homebrew installed but 'brew' is not on PATH"
+        "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+        || { bad failed "Homebrew installer"; return 1; }
+    load_brew || { bad failed "Homebrew installed but 'brew' is not on PATH"; return 1; }
+    return 0
 }
 
 #==============================================================================
@@ -404,14 +410,23 @@ prune_shadowed() {
         fi
 
         # Every path for the entry, so a partially cleaned install finishes.
+        #
+        # -L as well as -e: these tables list a binary and the symlinks beside
+        # it, and removing the binary first leaves those links dangling. -e
+        # follows a symlink, so a dangling one tests false and would be skipped
+        # forever -- which is exactly what stranded ~/.local/bin/beads once
+        # ~/.local/bin/bd was gone.
         for p in "${paths[@]}"; do
-            [[ -e $p ]] || continue
-            act removed "$(tilde "$p") (superseded by brew $formula)"
+            [[ -e $p || -L $p ]] || continue
+
             if [[ -w ${p%/*} ]]; then
+                act removed "$(tilde "$p") (superseded by brew $formula)"
                 run rm -rf "$p"
-            else
-                need_sudo
+            elif need_sudo; then
+                act removed "$(tilde "$p") (superseded by brew $formula)"
                 run sudo rm -rf "$p"
+            else
+                warn "cannot remove $(tilde "$p") without sudo; it still shadows brew $formula"
             fi
         done
     done
@@ -470,16 +485,24 @@ stage_configs() {
             N_OK+=1
             continue
         fi
-        if [[ -e $dest ]]; then
-            backup_of "$dest"
+        local existed=false
+        [[ -e $dest ]] && { existed=true; backup_of "$dest"; }
+
+        # Copy before reporting, so one unwritable destination is a warning
+        # about that file rather than an abort that strands every file after
+        # it -- and so the counters describe what actually happened.
+        if ! { run mkdir -p "${dest%/*}" && run cp -a "$src" "$dest"; }; then
+            warn "could not write $(tilde "$dest")"
+            continue
+        fi
+
+        if $existed; then
             act updated "$(tilde "$dest")${LAST_BACKUP:+   backup: $(tilde "$LAST_BACKUP")}"
             N_UPDATED+=1
         else
             act created "$(tilde "$dest")"
             N_CREATED+=1
         fi
-        run mkdir -p "${dest%/*}"
-        run cp -a "$src" "$dest"
     done < <(tracked_files)
 
     if ((N_OK + N_CREATED + N_UPDATED == 0)); then
@@ -584,7 +607,12 @@ stage_bashrc() {
 
     # Nothing worth preserving in a file this run just created.
     $fresh || backup_of "$rc"
-    cat "$tmp" >"$rc"          # redirect, not mv: keeps inode and permissions
+    # Redirect, not mv: keeps the inode and permissions.
+    if ! cat "$tmp" >"$rc"; then
+        rm -f "$tmp"
+        bad failed "could not write $(tilde "$rc")"
+        return 1
+    fi
     rm -f "$tmp"
 
     if $had_block; then act updated "$(tilde "$rc") loader block refreshed"
@@ -664,6 +692,26 @@ summary() {
     fi
 }
 
+# Run one stage, recording rather than propagating a failure. Stages are
+# independent -- deploying configs needs neither apt nor brew -- so one going
+# wrong must not take the others down with it. Without this, a sudo timeout
+# during package installs silently skipped every dotfile on the machine.
+#
+# Stages signal failure by returning non-zero explicitly, never by relying on
+# errexit: bash disables errexit inside a function invoked from a && or ||
+# list, so a bare failing command here would neither abort its stage nor be
+# reported. Every fallible command in a stage is checked at its call site.
+run_stage() {
+    local name=$1 rc=0
+    stage_enabled "$name" || return 0
+    "stage_${name//-/_}" || rc=$?
+    if ((rc)); then
+        FAILURES+=("stage '$name' exited $rc")
+        bad failed "stage '$name' exited $rc; continuing with the rest"
+    fi
+    return 0
+}
+
 main() {
     parse_args "$@"
     preflight
@@ -675,12 +723,16 @@ main() {
 
     $DRY_RUN && hdr "dry run: no changes will be made"
 
-    if stage_enabled apt-remove;    then stage_apt_remove;    fi
-    if stage_enabled apt;           then stage_apt;           fi
-    if stage_enabled brew;          then stage_brew;          fi
-    if stage_enabled brew-packages; then stage_brew_packages; fi
-    if stage_enabled configs;       then stage_configs;       fi
-    if stage_enabled bashrc;        then stage_bashrc;        fi
+    # Configs first: they are fast, need no privileges and cannot fail for
+    # reasons outside this repo, so the dotfiles land even if a package
+    # source is unreachable. apt-remove still precedes apt, which is what
+    # actually matters -- purging needrestart keeps the installs quiet.
+    run_stage configs
+    run_stage bashrc
+    run_stage apt-remove
+    run_stage apt
+    run_stage brew
+    run_stage brew-packages
 
     summary
 }

@@ -40,10 +40,9 @@ fzf
 # until the next Ubuntu.
 shellcheck
 
-# Pinned major rather than plain "node", which is on 26 and floats across
-# major versions. pnpm comes from this formula's corepack.
-node@22
-pnpm
+# node and pnpm are deliberately NOT here; see ubuntu26/brew.txt. Machines
+# running a toolchain manager get them from it instead, and having both
+# supply the same binary is what let a project pinned to pnpm 10 run pnpm 11.
 
 # Not packaged by Ubuntu at all. The install script drops it in ~/.local/bin
 # where it goes stale unnoticed.

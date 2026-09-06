@@ -1,0 +1,21 @@
+# Homebrew formulae specific to Ubuntu 26.04.
+#
+# The shared list is ../common/brew.txt and is installed on every platform;
+# this file is only for additions unique to this one. Both are read, and a
+# formula appearing in both is installed once.
+
+# The JavaScript toolchain lives here rather than in the shared list because
+# it must not be installed on machines that run a version manager. pop24 uses
+# proto, whose shims already provide node, npm, npx, pnpm and pnpx; letting
+# Homebrew supply them too means two sources for the same binary, decided by
+# PATH order. That is exactly how a project pinned to pnpm 10 ended up running
+# pnpm 11, whose ERR_PNPM_IGNORED_BUILDS is a hard error rather than a warning.
+#
+# 90-proto.sh keeps the shims in front, but ordering is a mitigation; not
+# installing the duplicate is the fix.
+#
+# Pinned major rather than plain "node", which is on 26 and floats across major
+# versions. pnpm is its own formula rather than node@22's corepack, so that
+# upgrading node cannot silently change the package manager.
+node@22
+pnpm

@@ -65,6 +65,14 @@ occupy relative to `$HOME`, creating `<app>/` if needed. Nothing to register.
 entry per line, `#` starts a comment. Fully-qualified brew names
 (`user/tap/formula`) work; `brew install` taps automatically.
 
+Which list? **brew for anything that moves faster than the Ubuntu release
+cycle, apt for anything the system integrates with.** The gap is not
+theoretical — Ubuntu 26 ships `gh` 2.46 against Homebrew's 2.100, and does not
+package `kubectl`, `helm`, `k9s`, `yq`, `uv` or `pnpm` at all. Conversely
+`build-essential` must come from apt, because Homebrew on Linux compiles
+against the system toolchain, and daemons like tailscale or the Docker engine
+need apt's systemd integration rather than brew's CLI-only builds.
+
 **A shell tweak** — add a numbered file to `apps/bash/.bashrc.d/`. It gets
 sourced on shell start with no further wiring. Prefix controls order.
 
@@ -139,8 +147,20 @@ Use `--refresh` to force it.
 **opencode comes from `anomalyco/tap`, not homebrew-core.** The core formula is
 maintained by the Homebrew team and lags — it was 1.18.20 while the tap was
 already at 1.18.29. The tap is generated on every upstream release, and depends
-on `ripgrep` alone where core also pulls in `node`. If a previous
-install-script copy exists at `~/.opencode`, it is removed once the brew copy
-is verified to run, since it would otherwise shadow it on `PATH`. Sessions,
-credentials and config are untouched by this: they live in
-`~/.local/share/opencode`, `~/.local/state/opencode` and `~/.config/opencode`.
+on `ripgrep` alone where core also pulls in `node`.
+
+**Hand-installed copies are removed once brew provides the tool.** Vendor
+install scripts drop binaries into `~/.opencode`, `~/.local/bin` or
+`/usr/local/bin`, all of which sit ahead of Homebrew on `PATH` — so the old
+copy keeps winning and quietly goes stale, since nothing upgrades it. That is a
+real failure mode, not a hypothetical: the hand-installed `bd` was two releases
+behind the formula and shadowing it. The table is `SHADOWED` in
+`ubuntu26/setup.sh`, currently covering opencode, uv, beads, helm, k3d and
+kubectl.
+
+Removal happens only after the brew-installed binary is present *and* executes,
+so a failed install can never leave you with no copy at all. Only the exact
+listed paths are touched. No application data is involved — opencode's sessions,
+credentials and config live in `~/.local/share/opencode`,
+`~/.local/state/opencode` and `~/.config/opencode`, none of which this goes
+near.

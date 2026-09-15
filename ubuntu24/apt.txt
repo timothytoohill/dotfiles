@@ -1,0 +1,53 @@
+# Packages installed with apt on Ubuntu 24.04 LTS. One per line; "#" a comment.
+#
+# Separate from ubuntu26/apt.txt because this tracks 24.04: versions differ
+# throughout, and in one case enough to change where the package comes from.
+# Homebrew formulae are not release-tied, so those are shared in
+# ../common/brew.txt rather than duplicated here.
+#
+# Every entry below was verified present in a clean ubuntu:24.04 container.
+
+# Homebrew prerequisites. build-essential is not optional: Homebrew on Linux
+# compiles against the system toolchain.
+build-essential
+curl
+file
+git
+procps
+
+# System trust and signing. Wanted by apt itself, so brew's copies are no
+# substitute.
+ca-certificates
+gnupg
+
+# Shell and editors.
+#
+# neovim is NOT here, unlike on 26.04 -- see brew.txt. 24.04 ships 0.9.5 where
+# 26.04 ships 0.11.6, and plugin configurations written against 0.10+ will not
+# load on 0.9.
+#
+# tmux is 3.4 here against 3.6a on 26.04. The oh-my-tmux config in
+# common/apps guards its newer settings behind %if version checks, so 3.4
+# degrades rather than breaking, and apt's build stays matched to the system
+# terminfo.
+tmux
+vim
+
+# Networking and transfer
+net-tools
+openssh-server
+rsync
+
+# Utilities where 24.04 is at or near parity with brew: expect and unzip are
+# identical builds, and jq, htop, make and tree are close enough that tracking
+# the newer version buys nothing.
+expect
+htop
+jq
+make
+tree
+unzip
+
+# psql and friends. brew's equivalent is the keg-only libpq, which has to be
+# manually linked onto PATH; apt gives the client tools directly.
+postgresql-client

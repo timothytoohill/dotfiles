@@ -44,6 +44,7 @@ ubuntu26/                     Ubuntu 26.04
 ├── apt-remove.txt            packages to purge with apt
 ├── brew.txt                  formulae for this platform only
 └── apps/                     optional; overrides common/apps per file
+ubuntu24/                     Ubuntu 24.04 LTS, same shape
 pop24/                        Pop!_OS 24.04, same shape
 ```
 
@@ -79,7 +80,12 @@ releases. Homebrew is not tied to the distro, so its list is shared in
 `common/brew.txt`; a platform's own `brew.txt` is only for genuine additions,
 and a formula in both is installed once.
 
-One thing does belong in a platform list rather than the shared one: anything a
+A package also belongs in a platform list when the release it ships is too old
+to be interchangeable. `neovim` comes from apt on 26.04, which has 0.11.6, and
+from brew on 24.04, which has only 0.9.5 — old enough that plugin
+configurations written against 0.10+ will not load.
+
+One thing else belongs in a platform list rather than the shared one: anything a
 version manager on that machine also provides. `node@22` and `pnpm` sit in
 `ubuntu26/brew.txt` because pop24 runs proto, whose shims already supply `node`,
 `npm`, `npx`, `pnpm` and `pnpx`. Two sources for one binary leaves the winner to

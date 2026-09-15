@@ -1,0 +1,22 @@
+# Homebrew formulae specific to Ubuntu 24.04 LTS.
+#
+# The shared list is ../common/brew.txt and is installed on every platform;
+# this file is only for additions unique to this one. Both are read, and a
+# formula appearing in both is installed once.
+
+# 24.04 ships neovim 0.9.5, against 0.11.6 on 26.04 and 0.12.5 here. That gap
+# is not cosmetic: plugin configurations written against 0.10+ fail to load on
+# 0.9, so this is the one package worth taking from brew on this release and
+# from apt on the newer one.
+neovim
+
+# The JavaScript toolchain, for the same reason it is in ubuntu26/brew.txt
+# rather than the shared list: it must not be installed on machines running a
+# version manager, since proto's shims already provide node, npm, npx, pnpm
+# and pnpx. Two sources for one binary leaves the winner to PATH order.
+#
+# Pinned major rather than plain "node", which floats across majors. pnpm is
+# its own formula rather than node@22's corepack, so upgrading node cannot
+# silently change the package manager.
+node@22
+pnpm

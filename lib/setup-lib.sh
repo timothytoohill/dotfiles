@@ -64,6 +64,7 @@ DRY_RUN=false
 DO_BACKUP=true
 FORCE=false
 REFRESH=false
+UPGRADE_OPENCODE=false              # pre-answer the V1 -> V2 prompt with yes
 MODE=install                        # install | status | adopt
 declare -a ONLY=() SKIP=()
 
@@ -122,6 +123,9 @@ Options:
       --adopt       copy \$HOME -> repo for tracked files, then exit
       --no-backup   overwrite without saving a backup
       --force       skip the Ubuntu check
+      --upgrade-opencode
+                    replace opencode V1 with V2 without asking; needed to
+                    upgrade when there is no terminal to answer the prompt
   -h, --help        show this text
 
 Stages: ${ALL_STAGES[*]}
@@ -143,6 +147,7 @@ parse_args() {
             --no-backup)  DO_BACKUP=false ;;
             --force)      FORCE=true ;;
             --refresh)    REFRESH=true ;;
+            --upgrade-opencode) UPGRADE_OPENCODE=true ;;
             --status)     MODE=status ;;
             --adopt)      MODE=adopt ;;
             --only)
@@ -410,7 +415,12 @@ stage_brew() {
 # paths are ever removed; user data is not involved. opencode is the clearest
 # case -- its 239M private prefix holds no state at all, since sessions live
 # in ~/.local/share/opencode and config in ~/.config/opencode.
+#
+# opencode appears twice because both major versions' install scripts use the
+# same prefix, ~/.opencode/bin, and either brew formula supersedes it. The V1
+# entry still matters on machines where the upgrade to V2 was declined.
 SHADOWED=(
+    "opencode-v2|opencode|$HOME/.opencode"
     "opencode|opencode|$HOME/.opencode"
     "uv|uv|$HOME/.local/bin/uv|$HOME/.local/bin/uvx"
     "beads|bd|$HOME/.local/bin/bd|$HOME/.local/bin/beads"
@@ -471,6 +481,208 @@ prune_shadowed() {
     done
 }
 
+#------------------------------------------------------------------------------
+# opencode V1 -> V2
+#------------------------------------------------------------------------------
+#
+# V2 ships as its own formula, anomalyco/tap/opencode-v2, which declares
+#
+#   conflicts_with "opencode", because: "both install an opencode binary"
+#
+# so Homebrew refuses to install it beside V1: upgrading means uninstalling V1
+# first. Note that "brew install --dry-run" does not evaluate conflicts_with
+# and will claim V2 installs cleanly over V1. Only a real install enforces it.
+#
+# The upgrade is one-way for the session history, which is why it is never
+# done without consent. Both versions use the same database,
+# ~/.local/share/opencode/opencode.db, and V2 migrates it in place on first
+# launch -- ten schema migrations at 2.0.19, one of them
+# clear_v1_session_permission. Sessions and messages survive, and V1 can still
+# list them afterwards, but the data V2 clears is gone. So the database is
+# backed up before V1 is removed.
+#
+# V1 is looked for in the two places this repo has installed it from: the brew
+# formula, and the install script's private prefix ~/.opencode. Only the
+# formula needs uninstalling. The prefix is left to prune_shadowed, which
+# removes it once V2 is installed and actually runs.
+
+# Major version of the install-script copy in ~/.opencode, or nothing. V1
+# prints its version bare ("1.18.33"), V2 prefixed ("opencode v2.0.19").
+opencode_script_major() {
+    local bin="$HOME/.opencode/bin/opencode" out=''
+    [[ -x $bin ]] || return 0
+    out=$(timeout 10 "$bin" --version 2>/dev/null) || true
+    if [[ $out =~ ([0-9]+)\.[0-9]+\.[0-9]+ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+    fi
+    return 0
+}
+
+# Snapshot the session database before V2 migrates it.
+#
+# SQLite's online backup rather than cp, because the file is normally open --
+# running setup from inside an opencode session is an ordinary way to use this
+# -- and copying a WAL-mode database mid-write can produce a torn copy. The
+# source is opened read-only, so the backup cannot checkpoint or otherwise
+# alter it. If python3 is missing or the backup fails, the database and its
+# -wal and -shm files are copied as-is instead.
+OPENCODE_BACKUP_PY='
+import sqlite3, sys, urllib.request
+src = sqlite3.connect("file:" + urllib.request.pathname2url(sys.argv[1]) + "?mode=ro", uri=True)
+dst = sqlite3.connect(sys.argv[2])
+src.backup(dst)
+dst.close()
+src.close()
+'
+
+backup_opencode_db() {
+    local db="$HOME/.local/share/opencode/opencode.db" to f
+    [[ -f $db ]] || return 0
+    if ! $DO_BACKUP; then
+        warn "--no-backup: $(tilde "$db") is not being saved before V2 migrates it"
+        return 0
+    fi
+
+    [[ -n $BACKUP_DIR ]] || BACKUP_DIR="$BACKUP_ROOT/$(date -u +%Y%m%dT%H%M%SZ)"
+    to="$BACKUP_DIR/${db#"$HOME"/}"
+    act backup "$(tilde "$db") -> $(tilde "$to")"
+    $DRY_RUN && return 0
+
+    mkdir -p "${to%/*}" || return 1
+    if command -v python3 >/dev/null 2>&1 \
+        && python3 -c "$OPENCODE_BACKUP_PY" "$db" "$to" 2>/dev/null; then
+        return 0
+    fi
+    for f in "$db" "$db-wal" "$db-shm"; do
+        if [[ -e $f ]]; then cp -a "$f" "${to%/*}/" || return 1; fi
+    done
+    return 0
+}
+
+# Consent for the upgrade. With no terminal to ask on, and no
+# --upgrade-opencode, the answer is no: an irreversible migration is never
+# the default.
+confirm_opencode_upgrade() {
+    local reply=''
+    $UPGRADE_OPENCODE && return 0
+    if [[ ! -t 0 ]]; then
+        warn "kept opencode V1: no terminal to confirm the upgrade to V2. Re-run interactively, or pass --upgrade-opencode."
+        return 1
+    fi
+    printf '    %sUpgrade opencode to V2? V1 is uninstalled first, and V2 migrates the\n' "$C_BOLD"
+    printf '    session database on its first launch; a backup is taken beforehand. [y/N]%s ' "$C_RESET"
+    read -r reply || true
+    [[ $reply == [yY] || $reply == [yY][eE][sS] ]]
+}
+
+# Bring opencode to V2 from whatever state it is in:
+#
+#   V2 from brew             nothing to do
+#   V1 from brew or script   ask; on yes, back up, uninstall V1, install V2
+#   V2 from script only      install V2 from brew -- same major, no migration
+#   nothing                  install V2
+#
+# $1 is the brew.txt spec, $2 the name of the caller's installed-formula map,
+# which is kept current so prune_shadowed acts on the result.
+ensure_opencode_v2() {
+    local spec=$1
+    local -n inst=$2
+    local tap='' v1_spec v1_desc='' v1_version=''
+    local v1_via_brew=false
+
+    if [[ -n ${inst[opencode-v2]:-} ]]; then
+        ok "$spec"
+        return 0
+    fi
+
+    # V1 comes back from the same tap if V2 fails to install.
+    [[ $spec == */* ]] && tap="${spec%/*}/"
+    v1_spec="${tap}opencode"
+
+    if [[ -n ${inst[opencode]:-} ]]; then
+        v1_via_brew=true
+        v1_version=$(brew list --versions opencode 2>/dev/null | awk '{print $2}') || true
+        v1_desc="opencode V1 ${v1_version:-(unknown version)} from brew"
+    elif [[ $(opencode_script_major) == 1 ]]; then
+        v1_desc="opencode V1 from the install script in $(tilde "$HOME/.opencode")"
+    fi
+
+    # Nothing to upgrade from. Also covers a V2 install-script copy, which
+    # brew simply supersedes.
+    if [[ -z $v1_desc ]]; then
+        act install "$spec"
+        if $DRY_RUN; then
+            inst[opencode-v2]=1
+            return 0
+        fi
+        if brew install "$spec"; then
+            inst[opencode-v2]=1
+            return 0
+        fi
+        FAILURES+=("brew install $spec")
+        bad failed "brew install $spec"
+        return 1
+    fi
+
+    note found "$v1_desc; V2 replaces it"
+    if $DRY_RUN; then
+        act upgrade "to $spec -- would ask first, then uninstall V1"
+        return 0
+    fi
+    if ! confirm_opencode_upgrade; then
+        note kept "$v1_desc"
+        return 0
+    fi
+
+    # Installing is safe while V1 runs -- a running process keeps its binary --
+    # but launching V2 is not: it migrates the database those sessions write.
+    if pgrep -x opencode >/dev/null 2>&1; then
+        warn "opencode is running; close those sessions before starting V2, which migrates the database they are using"
+    fi
+
+    if ! backup_opencode_db; then
+        FAILURES+=("opencode database backup")
+        bad failed "could not back up the opencode database; V1 left in place"
+        return 1
+    fi
+
+    # HOMEBREW_NO_AUTOREMOVE keeps this to V1 alone. Without it brew uninstall
+    # sweeps every orphaned dependency on the machine -- fifteen formulae in
+    # testing, unrelated ones included -- and removes ripgrep, which V2 needs
+    # and would immediately reinstall.
+    if $v1_via_brew; then
+        act uninstall "$v1_desc"
+        if ! HOMEBREW_NO_AUTOREMOVE=1 brew uninstall --formula opencode; then
+            FAILURES+=("brew uninstall opencode")
+            bad failed "brew uninstall opencode; V2 not installed"
+            return 1
+        fi
+        unset 'inst[opencode]'
+    fi
+
+    act install "$spec"
+    if brew install "$spec"; then
+        inst[opencode-v2]=1
+        info "V2 migrates the session database on its first launch"
+        return 0
+    fi
+    FAILURES+=("brew install $spec")
+    bad failed "brew install $spec"
+
+    # Never leave the machine with no opencode at all. The tap carries only
+    # the latest V1, so this restores V1, not necessarily the exact version.
+    if $v1_via_brew; then
+        act restore "$v1_spec"
+        if brew install "$v1_spec"; then
+            inst[opencode]=1
+        else
+            FAILURES+=("brew install $v1_spec (restoring V1)")
+            bad failed "could not restore V1 -- opencode is not installed"
+        fi
+    fi
+    return 1
+}
+
 stage_brew_packages() {
     hdr "brew packages"
 
@@ -499,6 +711,13 @@ stage_brew_packages() {
 
     local spec
     for spec in "${want[@]}"; do
+        # V2 cannot be installed while V1 is, so it takes its own path. A
+        # failure is recorded in there; the rest of the list still runs.
+        if [[ ${spec##*/} == opencode-v2 ]]; then
+            ensure_opencode_v2 "$spec" have || true
+            continue
+        fi
+
         if [[ -n ${have[${spec##*/}]:-} ]]; then
             ok "$spec"
             continue

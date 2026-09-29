@@ -162,6 +162,8 @@ Anything about to be overwritten is first copied to
     --adopt       copy $HOME -> repo for tracked files, then exit
     --no-backup   overwrite without saving a backup
     --force       skip the Ubuntu check
+    --upgrade-opencode
+                  replace opencode V1 with V2 without asking
 -h, --help        show usage
 ```
 
@@ -183,10 +185,43 @@ removed without `--purge` gets finished off.
 **`apt-get update` is skipped when the package lists are under 24 hours old.**
 Use `--refresh` to force it.
 
-**opencode comes from `anomalyco/tap`, not homebrew-core.** The core formula is
-maintained by the Homebrew team and lags — it was 1.18.20 while the tap was
-already at 1.18.29. The tap is generated on every upstream release, and depends
-on `ripgrep` alone where core also pulls in `node`.
+**opencode is V2, from `anomalyco/tap/opencode-v2`.** It is a separate formula
+from V1 (`opencode`), only available from the upstream tap — homebrew-core has
+no `opencode-v2`. It declares `conflicts_with "opencode"` because both ship a
+binary named `opencode`, so Homebrew refuses to install it while V1 is present.
+`brew install --dry-run` does not check that and will claim it installs
+cleanly; only a real install enforces it.
+
+Where there is no opencode, V2 is installed. Where V1 is found — from brew, or
+from the install script in `~/.opencode` — setup **asks** before replacing it:
+
+```
+found     opencode V1 1.18.33 from brew; V2 replaces it
+Upgrade opencode to V2? V1 is uninstalled first, and V2 migrates the
+session database on its first launch; a backup is taken beforehand. [y/N]
+```
+
+The default is no, and with no terminal to ask on, V1 is kept with a warning
+unless `--upgrade-opencode` is passed. The upgrade is one-way for your session
+history, which is why it is never done by default. Both versions use the same
+database, `~/.local/share/opencode/opencode.db`, and V2 migrates it in place on
+first launch: at 2.0.19 that is ten schema migrations, one of them
+`clear_v1_session_permission`. Sessions and messages survive, and V1 can still
+list them afterwards, but the data V2 clears is gone.
+
+On yes, setup:
+
+1. backs up the database to `~/.dotfiles-backup/<utc-timestamp>/`, using
+   SQLite's online backup because the file is usually open — including by the
+   opencode session you might be running setup from, which it warns about;
+2. uninstalls V1 with `HOMEBREW_NO_AUTOREMOVE`, since plain `brew uninstall`
+   sweeps every orphaned dependency on the machine — fifteen formulae in
+   testing — including `ripgrep`, which V2 needs;
+3. installs V2, and if that fails, reinstalls V1 so the machine is never left
+   without opencode.
+
+An install-script copy of either version in `~/.opencode` is removed once
+brew's V2 is installed and runs, as below.
 
 **Hand-installed copies are removed once brew provides the tool.** Vendor
 install scripts drop binaries into `~/.opencode`, `~/.local/bin` or
@@ -194,8 +229,8 @@ install scripts drop binaries into `~/.opencode`, `~/.local/bin` or
 copy keeps winning and quietly goes stale, since nothing upgrades it. That is a
 real failure mode, not a hypothetical: the hand-installed `bd` was two releases
 behind the formula and shadowing it. The table is `SHADOWED` in
-`ubuntu26/setup.sh`, currently covering opencode, uv, beads, helm, k3d and
-kubectl.
+`lib/setup-lib.sh`, currently covering opencode (both major versions), uv,
+beads, helm, k3d and kubectl.
 
 Removal happens only after the brew-installed binary is present *and* executes,
 so a failed install can never leave you with no copy at all. Only the exact

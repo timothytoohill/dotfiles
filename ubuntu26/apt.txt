@@ -28,10 +28,36 @@ neovim
 tmux
 vim
 
-# Networking and transfer
-net-tools
+# Remote access and transfer
 openssh-server
 rsync
+
+# Network diagnostics. A minimal install has none of these -- not even ip, ss
+# or nc, which fuller installs ship -- so every one is listed rather than
+# assumed.
+#
+# From apt, not brew. ping and mtr work for an ordinary user only because the
+# package grants them cap_net_raw when it is installed as root; the kernel's
+# alternative, unprivileged ping sockets (net.ipv4.ping_group_range), is often
+# switched off. A brew install runs as the user and cannot grant that, so its
+# mtr would need sudo every time.
+#
+# Names are the ones that exist on both 24.04 and 26.04. 26.04 dropped
+# dnsutils, so the real package bind9-dnsutils is listed; telnet is likewise
+# only a transitional package for inetutils-telnet.
+iputils-ping        # ping
+traceroute          # traceroute
+mtr-tiny            # mtr: ping and traceroute combined, live; no X11 deps
+bind9-dnsutils      # dig, nslookup, host
+whois               # whois
+iproute2            # ip, ss
+net-tools           # netstat, ifconfig, route, arp
+netcat-openbsd      # nc
+tcpdump             # packet capture; needs sudo to run
+nmap                # host and port scanning
+iperf3              # bandwidth between machines; its daemon is left off
+socat               # relay data between sockets, poke at ports
+inetutils-telnet    # telnet
 
 # Utilities apt ships at parity with brew, or close enough that tracking the
 # newer version buys nothing: unzip and make are identical builds, expect has

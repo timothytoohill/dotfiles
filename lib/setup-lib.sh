@@ -57,7 +57,8 @@ END_MARK="# <<< dotfiles <<<"
 BEGIN_GLOB='# >>> dotfiles*>>>'
 END_GLOB='# <<< dotfiles*<<<'
 
-ALL_STAGES=(apt-remove apt brew brew-packages configs bashrc)
+# In run order, which is how --help lists them.
+ALL_STAGES=(configs bashrc apt-remove apt guest-agent brew brew-packages)
 
 # Options
 DRY_RUN=false
@@ -348,6 +349,68 @@ stage_apt() {
     fi
     act install "${missing[*]}"
     apt_get install -y "${missing[@]}" || { bad failed "apt-get install"; return 1; }
+    return 0
+}
+
+#==============================================================================
+# Stage: guest-agent
+#==============================================================================
+#
+# A VM's host needs an agent inside the guest to shut it down cleanly and see
+# its IP addresses; Proxmox also uses it to freeze the filesystem so backups
+# and snapshots are consistent. Which agent depends on the hypervisor, read
+# from systemd-detect-virt --vm. Containers report "none" there, so LXC and
+# Docker are correctly skipped.
+#
+#   kvm, qemu   qemu-guest-agent   Proxmox, or any other QEMU host
+#   vmware      open-vm-tools
+#
+# qemu-guest-agent is safe on any QEMU/KVM VM, Proxmox or not. Its unit is
+# static and BindsTo the virtio channel the host provides, and a udev rule
+# starts it whenever that channel appears, so without one it never runs. The
+# channel only exists once the agent is turned on in the VM's Proxmox options.
+# Being virtual hardware, it is added when Proxmox starts the VM: a reboot
+# from inside the guest keeps the same QEMU process and does not add it.
+
+QGA_CHANNEL=/dev/virtio-ports/org.qemu.guest_agent.0
+
+stage_guest_agent() {
+    hdr "guest agent"
+    local virt='' pkg service
+    virt=$(systemd-detect-virt --vm 2>/dev/null) || true
+
+    case $virt in
+        kvm|qemu) pkg=qemu-guest-agent; service=qemu-guest-agent ;;
+        vmware)   pkg=open-vm-tools;    service=open-vm-tools ;;
+        ''|none)  info "not a virtual machine"; return 0 ;;
+        *)        info "$virt virtual machine; no guest agent is configured for it"; return 0 ;;
+    esac
+
+    if [[ $(pkg_status "$pkg") == installed ]]; then
+        ok "$pkg ($virt)"
+    else
+        if ! apt_cache_fresh; then
+            act update "apt-get update"
+            apt_get update -qq || warn "apt-get update failed; using the cached lists"
+        fi
+        act install "$pkg ($virt guest)"
+        apt_get install -y "$pkg" || { bad failed "apt-get install $pkg"; return 1; }
+    fi
+
+    if [[ $pkg == qemu-guest-agent && ! -e $QGA_CHANNEL ]]; then
+        warn "the host has not given this VM a guest-agent channel, so the agent cannot run. In Proxmox, turn on Options > QEMU Guest Agent for this VM (or 'qm set <vmid> --agent 1'), then shut it down and start it from Proxmox; a reboot from inside the VM is not enough."
+        return 0
+    fi
+
+    # Both packages try to start their service on install, but not always
+    # successfully, and the QEMU agent cannot start before its channel exists.
+    if systemctl is-active --quiet "$service"; then
+        ok "$service running"
+        return 0
+    fi
+    act start "$service"
+    need_sudo || return 1
+    run sudo systemctl start "$service" || { bad failed "systemctl start $service"; return 1; }
     return 0
 }
 
@@ -1002,6 +1065,7 @@ main() {
     run_stage bashrc
     run_stage apt-remove
     run_stage apt
+    run_stage guest-agent
     run_stage brew
     run_stage brew-packages
 

@@ -167,7 +167,9 @@ Anything about to be overwritten is first copied to
 -h, --help        show usage
 ```
 
-Stages, in run order: `apt-remove apt brew brew-packages configs bashrc`.
+Stages, in run order: `configs bashrc apt-remove apt guest-agent brew brew-packages`.
+Configs go first because they need no privileges and no network, so the
+dotfiles land even when a package stage fails.
 
 ## Notes
 
@@ -176,7 +178,7 @@ Stages, in run order: `apt-remove apt brew brew-packages configs bashrc`.
 only if a stage actually needs to touch packages, and the credential is held
 open for the rest of the run. `./setup.sh --only configs` never prompts.
 
-**`apt-remove` runs first, on purpose.** `needrestart` is what interrogates you
+**`apt-remove` runs before `apt`, on purpose.** `needrestart` is what interrogates you
 about restarting services during every apt transaction, so purging it before
 the install stage keeps the rest of the run quiet. Packages are purged when
 dpkg reports them `installed` *or* `config-files`, so a package previously
@@ -184,6 +186,28 @@ removed without `--purge` gets finished off.
 
 **`apt-get update` is skipped when the package lists are under 24 hours old.**
 Use `--refresh` to force it.
+
+**VMs get their hypervisor's guest agent.** The host uses it to shut the VM down
+cleanly and see its IP addresses; Proxmox also uses it to freeze the filesystem
+so backups and snapshots are consistent. The `guest-agent` stage asks
+`systemd-detect-virt --vm` which hypervisor this is:
+
+| detected | installs | covers |
+| --- | --- | --- |
+| `kvm`, `qemu` | `qemu-guest-agent` | Proxmox, or any other QEMU host |
+| `vmware` | `open-vm-tools` | VMware |
+
+Bare metal, containers (LXC, Docker) and other hypervisors are left alone.
+Adding a hypervisor is one line in `stage_guest_agent`.
+
+`qemu-guest-agent` also needs switching on from the Proxmox side, which setup
+cannot do from inside the VM. When the agent's channel is missing, setup says
+so: turn on **Options → QEMU Guest Agent** for the VM (or
+`qm set <vmid> --agent 1`), then shut the VM down and start it from Proxmox.
+The channel is virtual hardware added when Proxmox starts the VM, so a reboot
+from inside the guest is not enough. Installing the agent first is harmless —
+its service is tied to that channel and simply never runs without it. Check it
+from the Proxmox host with `qm agent <vmid> ping`.
 
 **opencode is V2, from `anomalyco/tap/opencode-v2`.** It is a separate formula
 from V1 (`opencode`), only available from the upstream tap — homebrew-core has

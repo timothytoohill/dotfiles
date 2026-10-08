@@ -207,6 +207,11 @@ removed without `--purge` gets finished off.
 **`apt-get update` is skipped when the package lists are under 24 hours old.**
 Use `--refresh` to force it.
 
+**apt waits up to ten minutes for the dpkg lock**, which unattended-upgrades
+often holds for a while after boot; left alone, `apt-get` fails at once. The
+package-lists lock that `apt-get update` takes cannot be waited for, so if it is
+busy, setup warns and carries on with the cached lists.
+
 **VMs get their hypervisor's guest agent.** The host uses it to shut the VM down
 cleanly and see its IP addresses; Proxmox also uses it to freeze the filesystem
 so backups and snapshots are consistent. The `guest-agent` stage asks

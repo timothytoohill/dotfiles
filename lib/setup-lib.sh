@@ -236,9 +236,21 @@ read_list() {
 
 pkg_status() { dpkg-query -W -f='${db:Status-Status}' "$1" 2>/dev/null || true; }
 
+# How long apt-get waits for the dpkg lock, in seconds. On its own it waits
+# not at all -- only the "apt" command waits by default -- and shortly after
+# boot unattended-upgrades often holds the lock for minutes, which would fail
+# every apt stage on a freshly installed machine. Ten minutes is generous for
+# that; a lock held longer probably needs looking at.
+#
+# apt-get update takes a different lock, on the package lists, which no
+# option makes it wait for. That is tolerable because a failed update is only
+# a warning here: the stages carry on with the cached lists.
+APT_LOCK_TIMEOUT=600
+
 apt_get() {
     need_sudo || return 1
-    run sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get "$@"
+    run sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a \
+        apt-get -o DPkg::Lock::Timeout="$APT_LOCK_TIMEOUT" "$@"
 }
 
 # Copy a path into this run's backup directory, preserving its position

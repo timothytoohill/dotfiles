@@ -1,0 +1,8 @@
+# Public keys every machine accepts over SSH. setup.sh adds each one to
+# ~/.ssh/authorized_keys if it is missing, and never removes a key, so keys a
+# machine gained some other way survive. One key per line, as in a .pub file;
+# see "How ~/.ssh/authorized_keys is handled" in the README.
+#
+# Public keys are safe to publish, but never put a private key here.
+
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIL5NjG/10NLf5uQFjAlBTbeM8MCz6uYrkI5SyuZhuo1T

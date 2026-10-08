@@ -16,6 +16,7 @@
 #   brew        skipped entirely when the binary is already present
 #   configs     cmp(1) per file; identical files are not rewritten
 #   bashrc      managed block is diffed before the file is touched at all
+#   ssh-keys    adds only keys that are missing, and never removes one
 #
 # Layout: each directory under an apps/ tree is an "app" whose contents mirror
 # $HOME. apps/tmux/.tmux.conf becomes ~/.tmux.conf, and nesting works, so
@@ -58,7 +59,7 @@ BEGIN_GLOB='# >>> dotfiles*>>>'
 END_GLOB='# <<< dotfiles*<<<'
 
 # In run order, which is how --help lists them.
-ALL_STAGES=(configs bashrc apt-remove apt guest-agent brew brew-packages)
+ALL_STAGES=(configs bashrc ssh-keys apt-remove apt guest-agent brew brew-packages)
 
 # Options
 DRY_RUN=false
@@ -972,6 +973,132 @@ stage_bashrc() {
 }
 
 #==============================================================================
+# Stage: ssh-keys
+#==============================================================================
+#
+# common/authorized_keys lists the public keys every machine should accept.
+# Each is added to ~/.ssh/authorized_keys when it is missing, and nothing is
+# ever removed, so keys a machine gained some other way -- cloud-init,
+# ssh-copy-id, someone else's -- survive. That is why this is a stage rather
+# than a file under apps/: the configs stage replaces whole files.
+#
+# A key counts as present when its type and base64 blob match, whatever
+# options precede it or comment follows, so a key that is already there under
+# another comment is not added twice.
+#
+# ~/.ssh is kept at 700 and the file at 600. Under Ubuntu's umask of 002 a
+# plain mkdir would leave both group-writable, which stock OpenSSH refuses.
+# Debian's sshd accepts it while the group holds only its owner -- the
+# user-group-modes patch -- but that is not worth depending on.
+
+SSH_KEYS_LIST=common/authorized_keys        # relative to the repo
+
+# The key lines of a key list or authorized_keys file: everything except
+# comments and blank lines. Not read_list, which cuts each line at its first
+# "#", and a key's comment may contain one.
+read_keys() {
+    [[ -r $1 ]] || return 0
+    grep -Ev '^[[:space:]]*(#|$)' "$1" || true
+}
+
+# For one key line print "<type> <blob>", which identifies the key, a tab, and
+# a label for output: the type and comment, or the end of the blob when there
+# is no comment. Prints nothing for a line that holds no key.
+key_parts() {
+    awk '{
+        for (i = 1; i < NF; i++)
+            if ($i ~ /^(ssh|ecdsa|sk)-/ && $(i + 1) ~ /^AAAA/) {
+                c = ""
+                for (j = i + 2; j <= NF; j++) c = c (c == "" ? "" : " ") $j
+                if (c == "") c = "..." substr($(i + 1), length($(i + 1)) - 7)
+                printf "%s %s\t%s %s\n", $i, $(i + 1), $i, c
+                exit
+            }
+    }' <<< "$1"
+}
+
+# Permission bits in octal, e.g. 700; nothing if the path does not exist.
+mode_of() { stat -c %a "$1" 2>/dev/null || true; }
+
+# $1 = "check" to report without changing anything, as --status does.
+stage_ssh_keys() {
+    local check=${1:-}
+    hdr "ssh keys"
+    local dir="$HOME/.ssh" file="$HOME/.ssh/authorized_keys"
+    local line id label i
+    local -a want=() missing=() labels=()
+    local -A have=() seen=()
+
+    mapfile -t want < <(read_keys "$REPO_DIR/$SSH_KEYS_LIST")
+    ((${#want[@]})) || { info "nothing listed"; return 0; }
+
+    while IFS= read -r line; do
+        id=''
+        IFS=$'\t' read -r id label < <(key_parts "$line") || true
+        [[ -n $id ]] && have[$id]=1
+    done < <(read_keys "$file")
+
+    for line in "${want[@]}"; do
+        id='' label=''
+        IFS=$'\t' read -r id label < <(key_parts "$line") || true
+        if [[ -z $id ]]; then
+            warn "not a public key, in $SSH_KEYS_LIST: ${line:0:40}"
+            continue
+        fi
+        [[ -n ${seen[$id]:-} ]] && continue     # listed twice: once is enough
+        seen[$id]=1
+        if [[ -n ${have[$id]:-} ]]; then
+            ok "$label"
+        else
+            missing+=("$line")
+            labels+=("$label")
+        fi
+    done
+
+    if [[ -n $check ]]; then
+        for i in "${!missing[@]}"; do note missing "${labels[i]}"; done
+        if [[ -d $dir && $(mode_of "$dir") != 700 ]]; then
+            note mode "$(tilde "$dir") is $(mode_of "$dir"), not 700"
+        fi
+        if [[ -f $file && $(mode_of "$file") != 600 ]]; then
+            note mode "$(tilde "$file") is $(mode_of "$file"), not 600"
+        fi
+        return 0
+    fi
+
+    # The directory first, so the file is never created inside a looser one.
+    if [[ ! -d $dir ]]; then
+        act created "$(tilde "$dir")"
+        run mkdir -m 700 "$dir" || { bad failed "mkdir $(tilde "$dir")"; return 1; }
+    elif [[ $(mode_of "$dir") != 700 ]]; then
+        act chmod "700 $(tilde "$dir"), was $(mode_of "$dir")"
+        run chmod 700 "$dir" || { bad failed "chmod $(tilde "$dir")"; return 1; }
+    fi
+
+    if ((${#missing[@]})); then
+        for i in "${!missing[@]}"; do act added "${labels[i]}"; done
+        if [[ -e $file ]]; then
+            backup_of "$file"
+            [[ -n $LAST_BACKUP ]] && info "backup: $(tilde "$LAST_BACKUP")"
+        fi
+        if ! $DRY_RUN; then
+            # A last line without its newline would fuse with the first key.
+            if [[ -s $file && -n $(tail -c 1 "$file") ]]; then
+                printf '\n' >> "$file" || { bad failed "write $(tilde "$file")"; return 1; }
+            fi
+            ( umask 077 && printf '%s\n' "${missing[@]}" >> "$file" ) \
+                || { bad failed "write $(tilde "$file")"; return 1; }
+        fi
+    fi
+
+    if [[ -f $file && $(mode_of "$file") != 600 ]]; then
+        act chmod "600 $(tilde "$file"), was $(mode_of "$file")"
+        run chmod 600 "$file" || { bad failed "chmod $(tilde "$file")"; return 1; }
+    fi
+    return 0
+}
+
+#==============================================================================
 # Modes: status and adopt
 #==============================================================================
 
@@ -995,6 +1122,8 @@ mode_status() {
     fi
 
     ((diff)) && info "run with --adopt to pull \$HOME changes back into the repo"
+
+    stage_ssh_keys check
     return 0
 }
 
@@ -1074,10 +1203,12 @@ main() {
 
     # Configs first: they are fast, need no privileges and cannot fail for
     # reasons outside this repo, so the dotfiles land even if a package
-    # source is unreachable. apt-remove still precedes apt, which is what
-    # actually matters -- purging needrestart keeps the installs quiet.
+    # source is unreachable. ssh-keys goes with them for the same reasons.
+    # apt-remove still precedes apt, which is what actually matters --
+    # purging needrestart keeps the installs quiet.
     run_stage configs
     run_stage bashrc
+    run_stage ssh-keys
     run_stage apt-remove
     run_stage apt
     run_stage guest-agent

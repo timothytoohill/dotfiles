@@ -30,6 +30,7 @@ Look before you leap:
 setup.sh                      platform dispatcher
 lib/setup-lib.sh              all the work, shared by every platform
 common/
+├── authorized_keys           public keys every machine accepts over SSH
 ├── brew.txt                  formulae installed everywhere
 └── apps/                     configs installed everywhere; mirror $HOME
     ├── bash/.bashrc.d/
@@ -105,6 +106,11 @@ package `kubectl`, `helm`, `k9s`, `yq`, `uv` or `pnpm` at all. Conversely
 against the system toolchain, and daemons like tailscale or the Docker engine
 need apt's systemd integration rather than brew's CLI-only builds.
 
+**A public key** — add its line to `common/authorized_keys`, exactly as it
+appears in a `.pub` file, and every machine adds it to
+`~/.ssh/authorized_keys`. Keys are never removed, so revoking one means
+deleting it from each machine as well as from the list.
+
 **A shell tweak** — add a numbered file to `apps/bash/.bashrc.d/`. It gets
 sourced on shell start with no further wiring. Prefix controls order.
 
@@ -165,6 +171,20 @@ logged in last is offered to every repository, which is how a work account once
 ended up pushing these dotfiles and was refused. SSH remotes never use the
 cache.
 
+## How `~/.ssh/authorized_keys` is handled
+
+Keys listed in `common/authorized_keys` are added to `~/.ssh/authorized_keys`
+when missing, by their own `ssh-keys` stage rather than as a file under
+`apps/`: a copied file would replace the whole thing, and with it every key a
+machine gained another way — cloud-init, `ssh-copy-id`, someone else's.
+Nothing is ever removed. A key already present with other options or another
+comment counts as present.
+
+The stage also keeps `~/.ssh` at `700` and the file at `600`. Ubuntu's umask of
+`002` would otherwise leave both group-writable, which stock OpenSSH refuses;
+Debian and Ubuntu patch `sshd` to accept it while the group holds only its
+owner, as per-user groups do, but that is not worth depending on.
+
 ## Copies, not symlinks
 
 Files are copied, so `$HOME` keeps working if this repo is moved or deleted.
@@ -194,9 +214,10 @@ Anything about to be overwritten is first copied to
 -h, --help        show usage
 ```
 
-Stages, in run order: `configs bashrc apt-remove apt guest-agent brew brew-packages`.
-Configs go first because they need no privileges and no network, so the
-dotfiles land even when a package stage fails.
+Stages, in run order:
+`configs bashrc ssh-keys apt-remove apt guest-agent brew brew-packages`.
+Configs and keys go first because they need no privileges and no network, so
+they land even when a package stage fails.
 
 ## Notes
 

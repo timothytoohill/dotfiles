@@ -35,6 +35,8 @@ common/
     ├── bash/.bashrc.d/
     │   ├── 00-brew.sh        Homebrew environment
     │   └── 10-prompt.sh      three-line prompt with git status and timers
+    ├── git/
+    │   └── .gitconfig        shared settings; includes ~/.gitconfig.local
     └── tmux/
         ├── .tmux.conf        oh-my-tmux
         └── .tmux.conf.local  local overrides
@@ -137,6 +139,22 @@ position the block occupies. `PATH` is the part that is order-sensitive, and
 so re-running it jumps ahead of anything already in front of Homebrew. That is
 why anything which must outrank Homebrew asserts itself from a later-numbered
 drop-in such as `90-proto.sh`, rather than relying on where the block sits.
+
+## How `~/.gitconfig` is handled
+
+`common/apps/git/.gitconfig` installs to `~/.gitconfig` like any other config,
+so every machine gets the same identity and defaults. It ends by including
+`~/.gitconfig.local`, which is not tracked: settings for one machine go there,
+and because the include comes last they override the shared ones. Git skips a
+missing include silently, so a machine with nothing of its own needs no file.
+
+`git config --global` writes to `~/.gitconfig`, and so do tools such as
+`gh auth setup-git` and `git lfs install`. Since files are copied rather than
+linked, those writes are drift: `--status` reports the file as differing, and
+the next run replaces it, keeping a backup. A setting every machine should have
+belongs in the repo — `--adopt`, review, commit. One for this machine alone
+belongs in the local file, which `git config --file ~/.gitconfig.local` writes
+directly.
 
 ## Copies, not symlinks
 

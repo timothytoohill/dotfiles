@@ -1,0 +1,23 @@
+# Managed by dotfiles: common/apps/git/.gitconfig, copied to ~/.gitconfig by
+# setup.sh. A change made to ~/.gitconfig itself -- by hand, or by
+# "git config --global", "gh auth setup-git" or "git lfs install" -- shows as
+# drift in "setup.sh --status", and the next run replaces it after taking a
+# backup. Settings every machine should have go in the repo copy; settings for
+# this machine alone go in ~/.gitconfig.local, included at the end.
+
+[user]
+	name = TimT
+	email = tim@toohill.dev
+[pull]
+	rebase = false
+[push]
+	default = simple
+[credential]
+	# In memory only, for seven days: git's cache daemon never writes
+	# credentials to disk.
+	helper = cache --timeout=604800
+
+# Last, so a machine's own settings override everything above. A missing file
+# is skipped silently, so machines without one need nothing.
+[include]
+	path = ~/.gitconfig.local

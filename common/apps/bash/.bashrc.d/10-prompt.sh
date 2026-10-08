@@ -13,11 +13,21 @@
 # segment turns red when the tree is unclean, and shows :<sha> when detached.
 
 # DEBUG fires just before every command. The guard keeps the timestamp of the
-# *first* command after a prompt, so pipelines/lists measure end-to-end.
+# *first* command after a prompt, so pipelines/lists measure end-to-end. It
+# fires before every prompt hook too, so nothing may run after __tt_prompt
+# clears the timestamp, or that hook restarts the timer; see the end of file.
 __tt_timer_start() {
     [[ -n ${__tt_cmd_start:-} ]] || __tt_cmd_start=$EPOCHREALTIME
 }
 trap '__tt_timer_start' DEBUG
+
+# The first prompt hook: stamp the moment the command finished, before other
+# hooks spend time that would be charged to it, and leave $? as it was.
+__tt_stop() {
+    local rc=$?
+    __tt_cmd_end=$EPOCHREALTIME
+    return "$rc"
+}
 
 # $1 = destination variable, $2 = microseconds -> HH:MM:SS.sss
 __tt_hms() {
@@ -28,7 +38,10 @@ __tt_hms() {
 }
 
 __tt_prompt() {
-    local now=$EPOCHREALTIME
+    # When the command finished, as stamped by __tt_stop; the current time if
+    # that hook has been removed.
+    local now=${__tt_cmd_end:-$EPOCHREALTIME}
+    unset __tt_cmd_end
     # "1788436798.654028" -> integer microseconds. 10# stops the zero-padded
     # fraction being parsed as octal.
     local now_us=$(( ${now%.*} * 1000000 + 10#${now#*.} ))
@@ -179,4 +192,29 @@ __tt_prompt() {
     PS1+="${c_cmd} cmd ${cmd_time}${r}"
     PS1+="\n\$ "
 }
-PROMPT_COMMAND=__tt_prompt
+
+# --- hooks ------------------------------------------------------------------
+# Other software hooks PROMPT_COMMAND as well, and its hooks have to survive.
+# In a GNOME terminal, VTE's reports the current directory, which is how a
+# new tab opens where the last one was. On 26.04, systemd's
+# /etc/profile.d/80-systemd-osc-context.sh adds one to every login shell, SSH
+# included. A plain PROMPT_COMMAND=__tt_prompt replaced VTE's hook outright.
+# systemd's survived, since it leaves element 0 free for exactly that kind of
+# assignment, but it then ran after __tt_prompt, where the DEBUG trap
+# restarted the timer on it, so "cmd" counted the time spent at the prompt.
+#
+# So the timer's hooks bracket everyone else's: __tt_stop first and
+# __tt_prompt last, with the rest in their original order. Rebuilding from a
+# filtered copy keeps a re-sourced ~/.bashrc from adding them twice and drops
+# the empty element systemd leaves. Bash 5.1+ runs every element of a
+# PROMPT_COMMAND array, and every platform here has 5.2 or later; a plain
+# string becomes element 0.
+__tt_hooks=()
+for __tt_h in ${PROMPT_COMMAND[@]+"${PROMPT_COMMAND[@]}"}; do
+    case $__tt_h in
+        ''|__tt_stop|__tt_prompt) ;;
+        *) __tt_hooks+=("$__tt_h") ;;
+    esac
+done
+PROMPT_COMMAND=(__tt_stop ${__tt_hooks[@]+"${__tt_hooks[@]}"} __tt_prompt)
+unset __tt_h __tt_hooks

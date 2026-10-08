@@ -123,7 +123,7 @@ Options:
       --status      report drift between the repo and \$HOME, then exit
       --adopt       copy \$HOME -> repo for tracked files, then exit
       --no-backup   overwrite without saving a backup
-      --force       skip the Ubuntu check
+      --force       run even if the OS does not match the platform
       --upgrade-opencode
                     replace opencode V1 with V2 without asking; needed to
                     upgrade when there is no terminal to answer the prompt

@@ -448,7 +448,8 @@ stage_brew() {
     done
     if ((${#missing[@]})); then
         act deps "${missing[*]}"
-        apt_get install -y "${missing[@]}"
+        apt_get install -y "${missing[@]}" \
+            || { bad failed "apt-get install ${missing[*]}"; return 1; }
     fi
 
     act install "Homebrew"

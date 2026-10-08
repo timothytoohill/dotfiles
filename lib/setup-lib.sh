@@ -859,10 +859,12 @@ EOF
 }
 
 # Rebuild ~/.bashrc: drop any previous managed block and the legacy opencode
-# PATH export, then append a fresh block at the end. Appending last matters --
-# stock Ubuntu assigns PS1 partway down the file, and the prompt drop-in has to
-# win. The result is diffed against the original, so an already-correct .bashrc
-# is not written at all.
+# PATH export, then append a fresh block at the end. Appending last is about
+# PATH, not the prompt: it gives the drop-ins the last word on PATH order,
+# after anything the file's own lines add. The prompt would win from anywhere,
+# since 10-prompt.sh sets PS1 from PROMPT_COMMAND on every prompt. The result
+# is diffed against the original, so an already-correct .bashrc is not written
+# at all.
 stage_bashrc() {
     hdr "bashrc"
     local rc="$HOME/.bashrc"

@@ -28,7 +28,9 @@ neovim
 tmux
 vim
 
-# Remote access and transfer
+# Remote access and transfer. Desktops get openssh-server as well, on
+# purpose, so every machine can be reached the same way; on a laptop that
+# means an SSH server on whatever network it joins.
 openssh-server
 rsync
 

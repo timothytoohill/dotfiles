@@ -158,6 +158,13 @@ belongs in the repo — `--adopt`, review, commit. One for this machine alone
 belongs in the local file, which `git config --file ~/.gitconfig.local` writes
 directly.
 
+Logins typed for HTTPS remotes are cached in memory for a week, and for GitHub
+they are kept per repository (`useHttpPath`): a login is only ever offered back
+to the repository it was typed for. Without that, whichever GitHub account
+logged in last is offered to every repository, which is how a work account once
+ended up pushing these dotfiles and was refused. SSH remotes never use the
+cache.
+
 ## Copies, not symlinks
 
 Files are copied, so `$HOME` keeps working if this repo is moved or deleted.

@@ -16,6 +16,12 @@
 	# In memory only, for seven days: git's cache daemon never writes
 	# credentials to disk.
 	helper = cache --timeout=604800
+[credential "https://github.com"]
+	# One login per repository instead of one per host. Without this the
+	# cache offers whichever GitHub account logged in last to every repo: a
+	# cached work-account login was once sent for a dotfiles push, and
+	# GitHub refused it with a 403.
+	useHttpPath = true
 
 # Last, so a machine's own settings override everything above. A missing file
 # is skipped silently, so machines without one need nothing.

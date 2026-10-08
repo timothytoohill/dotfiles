@@ -34,7 +34,9 @@ common/
 └── apps/                     configs installed everywhere; mirror $HOME
     ├── bash/.bashrc.d/
     │   ├── 00-brew.sh        Homebrew environment
-    │   └── 10-prompt.sh      three-line prompt with git status and timers
+    │   ├── 10-prompt.sh      two-line prompt with git status and timers
+    │   ├── 11-editor.sh      EDITOR=nvim
+    │   └── 90-proto.sh       proto shims ahead of Homebrew on PATH
     ├── git/
     │   └── .gitconfig        shared settings; includes ~/.gitconfig.local
     └── tmux/
@@ -89,11 +91,11 @@ configurations written against 0.10+ will not load.
 
 One thing else belongs in a platform list rather than the shared one: anything a
 version manager on that machine also provides. `node@22` and `pnpm` sit in
-`ubuntu26/brew.txt` because pop24 runs proto, whose shims already supply `node`,
-`npm`, `npx`, `pnpm` and `pnpx`. Two sources for one binary leaves the winner to
-`PATH` order, which is how a project pinned to pnpm 10 came to run pnpm 11.
-`90-proto.sh` keeps the shims in front, but that is a mitigation — not
-installing the duplicate is the fix.
+`ubuntu26/brew.txt` and `ubuntu24/brew.txt` because pop24 runs proto, whose
+shims already supply `node`, `npm`, `npx`, `pnpm` and `pnpx`. Two sources for
+one binary leaves the winner to `PATH` order, which is how a project pinned to
+pnpm 10 came to run pnpm 11. `90-proto.sh` keeps the shims in front, but that
+is a mitigation — not installing the duplicate is the fix.
 
 Which list? **brew for anything that moves faster than the distro release
 cycle, apt for anything the system integrates with.** The gap is not
@@ -119,7 +121,7 @@ Ubuntu has no drop-in directory for bash, so setup appends one guarded block to
 `~/.bashrc`:
 
 ```sh
-# >>> dotfiles (ubuntu26) >>>
+# >>> dotfiles >>>
 ...sources ~/.bashrc.d/*.sh...
 # <<< dotfiles <<<
 ```

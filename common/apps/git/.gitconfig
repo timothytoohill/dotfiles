@@ -10,6 +10,7 @@
 	email = tim@toohill.dev
 [pull]
 	rebase = false
+	ff = only
 [push]
 	default = simple
 [credential]

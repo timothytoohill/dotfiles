@@ -156,6 +156,24 @@ so every machine gets the same identity and defaults. It ends by including
 and because the include comes last they override the shared ones. Git skips a
 missing include silently, so a machine with nothing of its own needs no file.
 
+On a machine's first run, its own `~/.gitconfig` is not simply replaced. Setup
+recognises the shared copy by its first line, `# Managed by dotfiles`, and from
+any other `~/.gitconfig` it first moves every setting the shared copy lacks or
+sets differently to `~/.gitconfig.local`, so the machine keeps behaving as it
+did. A setting identical to the shared one stays behind: kept locally it would
+override the shared value for good, and a later change in the repo would never
+reach that machine. Settings that hold a list, such as `credential.helper`, add
+to the shared values rather than replace them; for credential helpers, an empty
+`helper =` line first clears the list.
+
+Moved settings are appended under a dated comment, never written over an
+existing `~/.gitconfig.local`, and both files are backed up first. Later runs
+find the shared copy in place and move nothing, so nothing moves twice. An
+include of `~/.gitconfig.local` itself never moves — git would include the file
+in itself and fail on every command — and a file git cannot parse is replaced
+outright, the backup keeping it. `--status` lists what would move, and
+`--adopt` keeps a machine's own `~/.gitconfig` out of the repo.
+
 `git config --global` writes to `~/.gitconfig`, and so do tools such as
 `gh auth setup-git` and `git lfs install`. Since files are copied rather than
 linked, those writes are drift: `--status` reports the file as differing, and

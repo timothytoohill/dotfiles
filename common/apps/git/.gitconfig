@@ -1,5 +1,7 @@
 # Managed by dotfiles: common/apps/git/.gitconfig, copied to ~/.gitconfig by
-# setup.sh. A change made to ~/.gitconfig itself -- by hand, or by
+# setup.sh. Keep this first line: it is how setup tells this copy from a
+# machine's own ~/.gitconfig, whose settings it moves to ~/.gitconfig.local
+# before replacing it. A change made to this copy later -- by hand, or by
 # "git config --global", "gh auth setup-git" or "git lfs install" -- shows as
 # drift in "setup.sh --status", and the next run replaces it after taking a
 # backup. Settings every machine should have go in the repo copy; settings for

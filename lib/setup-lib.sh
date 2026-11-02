@@ -819,6 +819,213 @@ stage_brew_packages() {
 # Stage: configs
 #==============================================================================
 
+#------------------------------------------------------------------------------
+# ~/.gitconfig and ~/.gitconfig.local
+#------------------------------------------------------------------------------
+#
+# The shared ~/.gitconfig ends by including ~/.gitconfig.local, which belongs
+# to the machine. The shared copy starts with GITCONFIG_MARK; a ~/.gitconfig
+# without it is the machine's own, met on the first run, and before the
+# shared copy replaces it, its settings move to ~/.gitconfig.local. Read last,
+# they keep the machine behaving as it did.
+#
+# Only settings the shared copy lacks, or has with other values, move. One
+# identical to the shared copy stays behind: kept in ~/.gitconfig.local it
+# would override the shared value for good, and a later change in the repo
+# would never reach that machine.
+#
+# Moved settings are appended under a dated comment, never written over what
+# ~/.gitconfig.local holds already, and both files are backed up first. Once
+# the shared copy is in place, later runs recognise it and move nothing, so
+# nothing moves twice. Two things never move: an include of
+# ~/.gitconfig.local itself, which would make git include the file in itself
+# and fail on every command, and a file git cannot parse, which is replaced
+# outright -- the backup keeps it.
+
+GITCONFIG="$HOME/.gitconfig"
+GITCONFIG_LOCAL="$HOME/.gitconfig.local"
+GITCONFIG_MARK='# Managed by dotfiles'
+
+gitconfig_is_shared() { grep -q "^$GITCONFIG_MARK" "$1" 2>/dev/null; }
+
+# One line per setting in a git config source, "$@" being --file <path> or
+# --blob <rev:path>: its name, then each of its values in order, tab-separated
+# and with newlines escaped. Two sources agree on a setting exactly when its
+# lines are identical. Fails when git cannot parse the source.
+gitconfig_lists() {
+    local raw rec key rc=0
+    local -A vals=()
+    local -a order=()
+    raw=$(mktemp) || return 1
+    git -C "$REPO_DIR" config "$@" --list -z >"$raw" 2>/dev/null </dev/null || rc=1
+    while IFS= read -r -d '' rec; do
+        key=${rec%%$'\n'*}
+        [[ -n ${vals[$key]+set} ]] || order+=("$key")
+        if [[ $rec == *$'\n'* ]]; then
+            rec=${rec#*$'\n'}
+            vals[$key]+=$'\t='"${rec//$'\n'/\\n}"
+        else
+            vals[$key]+=$'\t'               # a bare name, which means true
+        fi
+    done <"$raw"
+    rm -f "$raw"
+    ((rc == 0)) || return 1
+    for key in "${order[@]}"; do printf '%s%s\n' "$key" "${vals[$key]}"; done
+}
+
+# Names of the settings in config file $1, for output. Subsections are
+# masked, since they can hold a URL and a URL can hold a token.
+gitconfig_names() {
+    git config --file "$1" --name-only --list 2>/dev/null </dev/null |
+        awk '{ n = split($0, p, "."); s = (n > 2) ? p[1] ".*." p[n] : $0 }
+             !seen[s]++ { out = out (out == "" ? "" : ", ") s }
+             END { print out }'
+}
+
+# Where an include path points, resolved as git resolves it for a file in
+# $HOME: "~/" is the home directory, and a relative path is relative to the
+# including file.
+gitconfig_include_target() {
+    local p=$1
+    # shellcheck disable=SC2088  # a literal tilde, as written in the file
+    case $p in
+        '~')   p=$HOME ;;
+        '~/'*) p=$HOME/${p#'~/'} ;;
+        /*)    ;;
+        *)     p=$HOME/$p ;;
+    esac
+    realpath -m -- "$p"
+}
+
+# Drop sections left without a single setting, along with the comments in
+# them: git leaves a section's header behind when it removes its last setting.
+gitconfig_drop_empty() {
+    awk '
+        function flush() { if (keep) printf "%s", buf; buf = ""; keep = 0 }
+        /^[[:space:]]*\[/ {
+            flush(); buf = $0 "\n"; started = 1
+            keep = ($0 ~ /\][[:space:]]*[^[:space:]#;]/)    # "[core] editor = vi"
+            next
+        }
+        { buf = buf $0 "\n" }
+        !started || !/^[[:space:]]*([#;]|$)/ { keep = 1 }
+        END { flush() }
+    ' "$1"
+}
+
+# Work out what moves from ~/.gitconfig before $1, the repo copy, replaces it:
+# the settings that move, as config text, in $2/moved, and their names in
+# $2/names. Returns 1 when git is missing, 2 when git cannot parse one of the
+# files, and 3 when the repo copy has lost GITCONFIG_MARK, so a machine's own
+# file cannot be told from the shared one. Nothing moves in any of those.
+gitconfig_plan() {
+    local src=$1 work=$2 key val rec
+    command -v git >/dev/null 2>&1 || return 1
+    gitconfig_is_shared "$src" || return 3
+    cat -- "$GITCONFIG" >"$work/copy" || return 2
+    gitconfig_lists --file "$work/copy" >"$work/mine" || return 2
+    gitconfig_lists --file "$src" >"$work/base.raw" || return 2
+    LC_ALL=C sort -u "$work/base.raw" >"$work/base"
+
+    # Keep the settings whose values the repo copy does not have.
+    LC_ALL=C sort -u "$work/mine" | LC_ALL=C comm -23 - "$work/base" | cut -f1 >"$work/keep"
+    while IFS= read -r key; do
+        if ! grep -qxF -- "$key" "$work/keep"; then
+            git config --file "$work/copy" --unset-all "$key" </dev/null || return 2
+        fi
+    done < <(cut -f1 "$work/mine")
+
+    # Never an include of ~/.gitconfig.local itself.
+    git config --file "$work/copy" -z --get-regexp '^include(if\..*)?\.path$' \
+        >"$work/includes" 2>/dev/null </dev/null || true
+    while IFS= read -r -d '' rec; do
+        [[ $rec == *$'\n'* ]] || continue
+        key=${rec%%$'\n'*} val=${rec#*$'\n'}
+        if [[ $(gitconfig_include_target "$val") == "$GITCONFIG_LOCAL" ]]; then
+            git config --file "$work/copy" --fixed-value --unset-all "$key" "$val" \
+                </dev/null || return 2
+        fi
+    done <"$work/includes"
+
+    gitconfig_drop_empty "$work/copy" >"$work/moved"
+    gitconfig_names "$work/moved" >"$work/names"
+}
+
+# The names gitconfig_plan finds, for --status. Same return codes.
+gitconfig_preview() {
+    local work rc=0
+    work=$(mktemp -d) || return 1
+    gitconfig_plan "$1" "$work" || rc=$?
+    ((rc)) || cat -- "$work/names"
+    rm -rf "$work"
+    return "$rc"
+}
+
+# Move settings from ~/.gitconfig to ~/.gitconfig.local before $1, the repo
+# copy, replaces it. Fails when ~/.gitconfig has to stay as it is this run.
+gitconfig_to_local() {
+    local src=$1 work rc=0 names saved mode sep=''
+    [[ -f $GITCONFIG ]] || return 0
+    work=$(mktemp -d) || return 1
+    gitconfig_plan "$src" "$work" || rc=$?
+    case $rc in
+        0)  ;;
+        1)  warn "git is not installed, so $(tilde "$GITCONFIG") was left as it is: its settings could not be moved to $(tilde "$GITCONFIG_LOCAL"). Re-run setup once git is installed."
+            rm -rf "$work"; return 1 ;;
+        3)  warn "${src#"$REPO_DIR"/} no longer starts with '$GITCONFIG_MARK', so setup cannot tell it from a machine's own file; nothing was moved to $(tilde "$GITCONFIG_LOCAL")"
+            rm -rf "$work"; return 0 ;;
+        *)  warn "git cannot parse $(tilde "$GITCONFIG"), so none of its settings were moved to $(tilde "$GITCONFIG_LOCAL"); the shared copy replaces it, and the backup keeps it"
+            rm -rf "$work"; return 0 ;;
+    esac
+    names=$(<"$work/names")
+    if [[ -z $names ]]; then
+        gitconfig_is_shared "$GITCONFIG" ||
+            info "$(tilde "$GITCONFIG") has nothing the shared copy lacks; nothing to move"
+        rm -rf "$work"
+        return 0
+    fi
+
+    # ~/.gitconfig.local as it is to be, checked before anything is written:
+    # what it holds already, then the moved settings under a comment.
+    backup_of "$GITCONFIG"
+    saved=$LAST_BACKUP
+    if [[ -e $GITCONFIG_LOCAL ]]; then cat -- "$GITCONFIG_LOCAL" >"$work/local"; else : >"$work/local"; fi
+    if [[ -s $work/local ]]; then
+        # A blank line before the new block, after ending the last line.
+        sep=$'\n'
+        [[ -z $(tail -c 1 "$work/local") ]] || sep=$'\n\n'
+    fi
+    {
+        printf '%s' "$sep"
+        printf '# Moved here from ~/.gitconfig by dotfiles setup on %s,\n' "$(date -u '+%Y-%m-%d %H:%M UTC')"
+        printf '# before the shared copy replaced it. These override the shared settings.\n'
+        if [[ -n $saved ]]; then printf '# The whole file was saved as %s.\n' "$(tilde "$saved")"; fi
+        cat -- "$work/moved"
+    } >>"$work/local"
+    if ! git config --file "$work/local" --list >/dev/null 2>&1 </dev/null; then
+        warn "moving settings would leave $(tilde "$GITCONFIG_LOCAL") unreadable to git, so $(tilde "$GITCONFIG") was left as it is"
+        rm -rf "$work"
+        return 1
+    fi
+
+    act moved "$names from $(tilde "$GITCONFIG") to $(tilde "$GITCONFIG_LOCAL")"
+    if ! $DRY_RUN; then
+        if [[ -e $GITCONFIG_LOCAL ]]; then
+            backup_of "$GITCONFIG_LOCAL"
+            [[ -z $LAST_BACKUP ]] || info "backup: $(tilde "$LAST_BACKUP")"
+            cat -- "$work/local" >"$GITCONFIG_LOCAL" || rc=1     # keeps its mode
+        else
+            # The mode of the file the settings came from, which may have been
+            # kept private for a reason.
+            mode=$(stat -L -c %a -- "$GITCONFIG")
+            install -m "$mode" -- "$work/local" "$GITCONFIG_LOCAL" || rc=1
+        fi
+        ((rc == 0)) || warn "could not write $(tilde "$GITCONFIG_LOCAL"), so $(tilde "$GITCONFIG") was left as it is"
+    fi
+    rm -rf "$work"
+    return "$rc"
+}
+
 stage_configs() {
     hdr "configs"
     local src dest
@@ -826,6 +1033,9 @@ stage_configs() {
         if [[ -f $dest ]] && cmp -s "$src" "$dest"; then
             ok "$(tilde "$dest")"
             N_OK+=1
+            continue
+        fi
+        if [[ $dest == "$GITCONFIG" ]] && ! gitconfig_to_local "$src"; then
             continue
         fi
         local existed=false
@@ -1104,12 +1314,20 @@ stage_ssh_keys() {
 
 mode_status() {
     hdr "configs: repo vs \$HOME"
-    local src dest
-    local -i same=0 diff=0 miss=0
+    local src dest names
+    local -i same=0 diff=0 miss=0 adoptable=0
     while IFS=$'\t' read -r src dest; do
         if [[ ! -e $dest ]];        then note missing "$(tilde "$dest")"; miss+=1
         elif cmp -s "$src" "$dest"; then ok "$(tilde "$dest")";           same+=1
-        else                             bad differs "$(tilde "$dest")";  diff+=1
+        elif [[ $dest == "$GITCONFIG" ]] && ! gitconfig_is_shared "$dest"; then
+            # A machine's own ~/.gitconfig: not drift to adopt into the repo.
+            diff+=1
+            if names=$(gitconfig_preview "$src") && [[ -n $names ]]; then
+                note own "$(tilde "$dest"): setup moves $names to $(tilde "$GITCONFIG_LOCAL")"
+            else
+                note own "$(tilde "$dest"): not the shared copy; nothing in it to move"
+            fi
+        else bad differs "$(tilde "$dest")"; diff+=1; adoptable+=1
         fi
     done < <(tracked_files)
     printf '\n    %d same, %d differ, %d missing\n' "$same" "$diff" "$miss"
@@ -1121,7 +1339,7 @@ mode_status() {
         note missing "loader block absent from $(tilde "$HOME/.bashrc")"
     fi
 
-    ((diff)) && info "run with --adopt to pull \$HOME changes back into the repo"
+    ((adoptable)) && info "run with --adopt to pull \$HOME changes back into the repo"
 
     stage_ssh_keys check
     return 0
@@ -1133,6 +1351,12 @@ mode_adopt() {
     while IFS=$'\t' read -r src dest; do
         if [[ ! -e $dest ]];        then note missing "$(tilde "$dest")"; continue; fi
         if cmp -s "$src" "$dest";   then ok "$(tilde "$dest")";           continue; fi
+        # A machine's own ~/.gitconfig is no version of the shared one, and
+        # copying it into a public repo could publish whatever it holds.
+        if [[ $dest == "$GITCONFIG" ]] && ! gitconfig_is_shared "$dest"; then
+            note skipped "$(tilde "$dest") is this machine's own; setup moves its settings to $(tilde "$GITCONFIG_LOCAL")"
+            continue
+        fi
         act adopted "${src#"$REPO_DIR"/}  <-  $(tilde "$dest")"
         run cp -a "$dest" "$src"
     done < <(tracked_files)

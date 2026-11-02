@@ -166,21 +166,25 @@ reach that machine. Settings that hold a list, such as `credential.helper`, add
 to the shared values rather than replace them; for credential helpers, an empty
 `helper =` line first clears the list.
 
-Moved settings are appended under a dated comment, never written over an
-existing `~/.gitconfig.local`, and both files are backed up first. Later runs
-find the shared copy in place and move nothing, so nothing moves twice. An
-include of `~/.gitconfig.local` itself never moves — git would include the file
-in itself and fail on every command — and a file git cannot parse is replaced
-outright, the backup keeping it. `--status` lists what would move, and
-`--adopt` keeps a machine's own `~/.gitconfig` out of the repo.
+Later runs treat the shared copy the same way. `git config --global` writes to
+`~/.gitconfig`, and so do tools such as `gh auth setup-git` and
+`git lfs install`; the next run moves whatever they added to
+`~/.gitconfig.local` before reinstalling the shared copy, so nothing they set is
+lost. A value found in any version of the repo copy counts as the repo's and
+stays behind, so a machine with an older copy simply gets the new one. Removing
+a shared setting from `~/.gitconfig` does not stick: override it in
+`~/.gitconfig.local` instead, which `git config --file ~/.gitconfig.local`
+writes directly. A setting every machine should have belongs in
+`common/apps/git/.gitconfig`.
 
-`git config --global` writes to `~/.gitconfig`, and so do tools such as
-`gh auth setup-git` and `git lfs install`. Since files are copied rather than
-linked, those writes are drift: `--status` reports the file as differing, and
-the next run replaces it, keeping a backup. A setting every machine should have
-belongs in the repo — `--adopt`, review, commit. One for this machine alone
-belongs in the local file, which `git config --file ~/.gitconfig.local` writes
-directly.
+Moved settings are appended under a dated comment, never written over an
+existing `~/.gitconfig.local`, and both files are backed up first. What moved
+is gone from `~/.gitconfig` once the shared copy replaces it, so nothing moves
+twice. An include of `~/.gitconfig.local` itself never moves — git would
+include the file in itself and fail on every command — and a file git cannot
+parse is replaced outright, the backup keeping it. `--status` lists what the
+next run will move, and `--adopt` keeps a machine's own `~/.gitconfig` out of
+the repo.
 
 Logins typed for HTTPS remotes are cached in memory for a week, and for GitHub
 they are kept per repository (`useHttpPath`): a login is only ever offered back

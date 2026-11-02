@@ -824,20 +824,29 @@ stage_brew_packages() {
 #------------------------------------------------------------------------------
 #
 # The shared ~/.gitconfig ends by including ~/.gitconfig.local, which belongs
-# to the machine. The shared copy starts with GITCONFIG_MARK; a ~/.gitconfig
-# without it is the machine's own, met on the first run, and before the
-# shared copy replaces it, its settings move to ~/.gitconfig.local. Read last,
-# they keep the machine behaving as it did.
+# to the machine. Before the configs stage replaces ~/.gitconfig, whatever in
+# it did not come from the repo moves to ~/.gitconfig.local, where, read last,
+# it keeps the machine behaving as it did:
 #
-# Only settings the shared copy lacks, or has with other values, move. One
-# identical to the shared copy stays behind: kept in ~/.gitconfig.local it
-# would override the shared value for good, and a later change in the repo
+#   a machine's own file   met on the first run, recognised by lacking
+#                          GITCONFIG_MARK, the shared copy's first line. Every
+#                          setting the repo copy lacks, or has with other
+#                          values, moves.
+#   the shared copy        settings added to it since it was installed -- by
+#                          "git config --global", or tools such as
+#                          "gh auth setup-git" -- move. A value from any
+#                          version of the repo copy stays behind, so an older
+#                          copy is simply updated: what the repo has since
+#                          changed or dropped is not mistaken for an addition.
+#
+# A setting identical to the repo's stays behind: kept in ~/.gitconfig.local
+# it would override the shared value for good, and a later change in the repo
 # would never reach that machine.
 #
 # Moved settings are appended under a dated comment, never written over what
-# ~/.gitconfig.local holds already, and both files are backed up first. Once
-# the shared copy is in place, later runs recognise it and move nothing, so
-# nothing moves twice. Two things never move: an include of
+# ~/.gitconfig.local holds already, and both files are backed up first. What
+# moved is gone from ~/.gitconfig once the shared copy replaces it, so nothing
+# moves twice. Two things never move: an include of
 # ~/.gitconfig.local itself, which would make git include the file in itself
 # and fail on every command, and a file git cannot parse, which is replaced
 # outright -- the backup keeps it.
@@ -897,6 +906,23 @@ gitconfig_include_target() {
     realpath -m -- "$p"
 }
 
+# Every committed version of repo copy $1, as <commit>:<path>. When $1 is a
+# platform's own copy, the common copy's versions count too, since a machine
+# may have had either.
+gitconfig_versions() {
+    local rel=${1#"$REPO_DIR"/} c p
+    local -a paths=(common/apps/git/.gitconfig)
+    [[ $rel == "${paths[0]}" ]] || paths+=("$rel")
+    git -C "$REPO_DIR" log --format=%H -- "${paths[@]}" 2>/dev/null </dev/null |
+        while IFS= read -r c; do
+            for p in "${paths[@]}"; do
+                if git -C "$REPO_DIR" cat-file -e "$c:$p" 2>/dev/null </dev/null; then
+                    printf '%s:%s\n' "$c" "$p"
+                fi
+            done
+        done
+}
+
 # Drop sections left without a single setting, along with the comments in
 # them: git leaves a section's header behind when it removes its last setting.
 gitconfig_drop_empty() {
@@ -919,12 +945,18 @@ gitconfig_drop_empty() {
 # files, and 3 when the repo copy has lost GITCONFIG_MARK, so a machine's own
 # file cannot be told from the shared one. Nothing moves in any of those.
 gitconfig_plan() {
-    local src=$1 work=$2 key val rec
+    local src=$1 work=$2 key val rec rev shared=false
     command -v git >/dev/null 2>&1 || return 1
     gitconfig_is_shared "$src" || return 3
     cat -- "$GITCONFIG" >"$work/copy" || return 2
+    gitconfig_is_shared "$work/copy" && shared=true
     gitconfig_lists --file "$work/copy" >"$work/mine" || return 2
     gitconfig_lists --file "$src" >"$work/base.raw" || return 2
+    if $shared; then
+        while IFS= read -r rev; do
+            gitconfig_lists --blob "$rev" >>"$work/base.raw" || true
+        done < <(gitconfig_versions "$src")
+    fi
     LC_ALL=C sort -u "$work/base.raw" >"$work/base"
 
     # Keep the settings whose values the repo copy does not have.
@@ -947,6 +979,10 @@ gitconfig_plan() {
         fi
     done <"$work/includes"
 
+    # The shared copy's comments describe the shared settings, not these.
+    if $shared; then
+        sed -i -e '/^[[:space:]]*[#;]/d' -e '/^[[:space:]]*$/d' "$work/copy"
+    fi
     gitconfig_drop_empty "$work/copy" >"$work/moved"
     gitconfig_names "$work/moved" >"$work/names"
 }
@@ -1326,6 +1362,14 @@ mode_status() {
                 note own "$(tilde "$dest"): setup moves $names to $(tilde "$GITCONFIG_LOCAL")"
             else
                 note own "$(tilde "$dest"): not the shared copy; nothing in it to move"
+            fi
+        elif [[ $dest == "$GITCONFIG" ]]; then
+            # The shared copy, older or added to. Neither is worth adopting:
+            # one would undo the repo's changes, and additions move on their
+            # own.
+            bad differs "$(tilde "$dest")"; diff+=1
+            if names=$(gitconfig_preview "$src") && [[ -n $names ]]; then
+                info "the next run moves $names to $(tilde "$GITCONFIG_LOCAL")"
             fi
         else bad differs "$(tilde "$dest")"; diff+=1; adoptable+=1
         fi
